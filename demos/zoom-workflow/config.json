@@ -1,0 +1,12 @@
+{
+  "zoom_recordings_path": "~/Documents/Zoom",
+  "openai_api_key_env_var": "OPENAI_API_KEY",
+  "notion_api_key_env_var": "NOTION_API_KEY",
+  "notion_database_id": "YOUR_NOTION_DATABASE_ID",
+  "openai_model_for_prompts": "gpt-4o",
+  "runpod_endpoint_id": "YOUR_RUNPOD_ENDPOINT_ID",
+  "prompts_dir": "prompts",
+  "processed_files_path": "processed_files.json",
+  "max_audio_size_mb": 6,
+  "log_file": "pipeline.log"
+}

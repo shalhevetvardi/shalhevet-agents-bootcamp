@@ -1,0 +1,5 @@
+# No Python packages required — uses ffmpeg CLI directly
+# Make sure ffmpeg and ffprobe are installed:
+#   macOS:   brew install ffmpeg
+#   Ubuntu:  sudo apt install ffmpeg
+#   Windows: https://ffmpeg.org/download.html

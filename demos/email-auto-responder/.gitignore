@@ -1,0 +1,7 @@
+.env
+scripts/state.json
+scripts/results.json
+scripts/emails.json
+scripts/drafts_report.json
+__pycache__/
+*.pyc
