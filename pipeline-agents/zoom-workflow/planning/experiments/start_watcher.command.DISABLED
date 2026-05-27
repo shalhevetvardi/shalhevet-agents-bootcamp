@@ -1,0 +1,21 @@
+#!/bin/bash
+# Zoom Watcher — starts in Terminal (has Full Disk Access)
+# Minimizes the Terminal window automatically
+
+# Kill any existing watcher
+pkill -f "zoom_watcher.py" 2>/dev/null
+sleep 1
+
+# Minimize this Terminal window after 2 seconds
+(sleep 2 && osascript -e 'tell application "Terminal" to set miniaturized of front window to true') &
+
+# Set up environment
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
+set -a
+source "$HOME/Applications/zoom-workflow/.env"
+set +a
+
+cd "$HOME/Applications/zoom-workflow"
+echo "🎙️ Zoom Watcher started at $(date)"
+echo "Window will minimize in 2 seconds..."
+/usr/bin/python3 "$HOME/Applications/zoom-workflow/zoom_watcher.py"

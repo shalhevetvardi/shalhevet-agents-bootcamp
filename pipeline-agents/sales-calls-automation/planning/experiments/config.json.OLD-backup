@@ -1,0 +1,37 @@
+{
+  "airtable": {
+    "fields": {
+      "name": "fld87kewXVxYsmfFA",
+      "phone": "fldRptPXCUKe7SYuM",
+      "email": "fldeBc47gK7CYfIMg",
+      "notes": "fldUUZE4g8kKwCk8u",
+      "status": "fldQX4ejgug2SvmyX",
+      "gender": "fldBAlLq8K3zOsGVJ",
+      "transcript": "fldgOnnjDd3AV66GM",
+      "twilio_call_sid": "fld8wPiBcTWseFqHG",
+      "calendly_uri": "fld29XPqBcTY5AT47",
+      "call_datetime": "fldTFMtzyqDaQyMk1",
+      "call_duration_min": "fldD5pEezAaIG5sOs",
+      "recording_url": "fldQs8I9wSobRy3QT",
+      "ai_insights": "fldHOnZotRCU9qHpr",
+      "gmail_draft_link": "fldM7XTuIL01wYQWp"
+    }
+  },
+  "transcription": {
+    "max_audio_size_mb": 6,
+    "chunk_duration_seconds": 917,
+    "audio_bitrate": "64k",
+    "model_path": "ivrit-ai/whisper-large-v3-turbo-ct2"
+  },
+  "claude": {
+    "model": "claude-sonnet-4-6",
+    "max_tokens_analysis": 2000,
+    "max_tokens_email": 1500
+  },
+  "pipeline": {
+    "poll_interval_minutes": 5,
+    "twilio_lookback_hours": 24,
+    "calendly_lookahead_days": 30,
+    "calendly_lookback_days": 1
+  }
+}

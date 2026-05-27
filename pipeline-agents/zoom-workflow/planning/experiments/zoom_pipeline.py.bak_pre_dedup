@@ -1,0 +1,2073 @@
+#!/usr/bin/env python3
+"""
+zoom_pipeline.py — תהליך אוטומטי לתמלול הקלטות זום, ניתוב וניתוח
+==================================================================
+סורק תיקיית הקלטות זום, מתמלל עם Whisper API (word-level timestamps),
+מנתב לפרומפט ייעודי, ושומר תוצאות ב-Notion.
+
+שימוש: python zoom_pipeline.py [config.json]
+"""
+
+import os
+import sys
+import json
+import re
+import time
+import logging
+import hashlib
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import glob as glob_module
+import subprocess
+import tempfile
+
+import requests
+from openai import OpenAI
+
+# ─── הגדרות קבועות ───────────────────────────────────────────────
+
+ROUTE_TO_CATEGORY = {
+    "implementation_work_session_email": "פגישת הטמעה",
+    "internal_regular_email": "פגישה פנימית",
+    "org_sales_prep_psych_persona": "שיחת מכירה",
+    "org_characterization_post_sale": "פגישת אפיון",
+    "org_depth_extraction_for_content": "כללי",
+    "lesson_knowledge_rich": "שיעור",
+    "lesson_student_success_quotes": "שיעור",
+    "lesson_student_stories": "שיעור",
+    "other_general": "כללי",
+}
+
+# ROUTE_TO_OUTPUT_TYPE — הוסר כי עמודת "סוג פלט" נמחקה מ-Notion
+
+ROUTE_TO_PROMPT_FILE = {
+    "implementation_work_session_email": "implementation.txt",
+    "internal_regular_email": "internal.txt",
+    "org_sales_prep_psych_persona": "org_sales.txt",
+    "org_characterization_post_sale": "org_characterization.txt",
+    "org_depth_extraction_for_content": "org_depth.txt",
+    "lesson_knowledge_rich": "lesson_knowledge.txt",
+    "lesson_student_success_quotes": "lesson_quotes.txt",
+    "lesson_student_stories": "lesson_stories.txt",
+}
+
+ROUTE_TO_NOTION_COLUMN = {
+    "implementation_work_session_email": "פלט הטמעה",
+    "internal_regular_email": "פלט פנימי",
+    "org_sales_prep_psych_persona": "פלט מכירה",
+    "org_characterization_post_sale": "פלט אפיון",
+    "org_depth_extraction_for_content": "פלט עומק ארגוני",
+    "lesson_knowledge_rich": "פלט מסמך ידע",
+    "lesson_student_success_quotes": "פלט ציטוטי הצלחה",
+    "lesson_student_stories": "פלט סיפורי תלמידים",
+    "other_general": "פלט כללי",
+}
+
+VALID_ROUTE_IDS = list(ROUTE_TO_CATEGORY.keys())
+
+
+# ─── עזרים ────────────────────────────────────────────────────────
+
+def setup_logging(log_file: str) -> logging.Logger:
+    """הגדרת לוג לקובץ ולמסך."""
+    logger = logging.getLogger("zoom_pipeline")
+    logger.setLevel(logging.DEBUG)
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+
+    return logger
+
+
+def load_config(config_path: str) -> dict:
+    """טוען קובץ הגדרות JSON."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_processed_files(path: str) -> dict:
+    """טוען רשימת קבצים שכבר עובדו."""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_processed_files(path: str, data: dict):
+    """שומר רשימת קבצים שעובדו."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _normalize_path(path: str) -> str:
+    """מנרמל נתיב — מחליף את תיקיית הבית ב-~ כדי שיעבוד בכל מחשב (iCloud sync)."""
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        return "~" + path[len(home):]
+    return path
+
+
+
+def extract_date_from_folder(folder_name: str, file_path: str = None) -> Optional[str]:
+    """מחלץ תאריך מתוך שם תיקיית זום.
+    פורמט: YYYY-MM-DD HH.MM.SS ...
+    מחזיר: YYYY-MM-DD או None.
+    אם אין תאריך בשם ויש file_path — משתמש בתאריך השינוי של הקובץ כ-fallback.
+    """
+    match = re.match(r"(\d{4}-\d{2}-\d{2})", folder_name)
+    if match:
+        return match.group(1)
+    # fallback: תאריך שינוי הקובץ
+    if file_path:
+        try:
+            from datetime import datetime
+            mtime = Path(file_path).stat().st_mtime
+            return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return None
+
+
+def detect_language(text: str) -> str:
+    """זיהוי שפה פשוט על בסיס תווים עבריים.
+    >70% עברית → עברית, >70% אנגלית → אנגלית, אחרת → מעורב
+    """
+    if not text:
+        return "מעורב"
+
+    hebrew_chars = len(re.findall(r'[\u0590-\u05FF]', text))
+    latin_chars = len(re.findall(r'[a-zA-Z]', text))
+    total = hebrew_chars + latin_chars
+
+    if total == 0:
+        return "מעורב"
+
+    hebrew_ratio = hebrew_chars / total
+    if hebrew_ratio > 0.7:
+        return "עברית"
+    elif hebrew_ratio < 0.3:
+        return "אנגלית"
+    else:
+        return "מעורב"
+
+
+def api_call_with_retry(func, max_retries=3, logger=None):
+    """מבצע קריאת API עם retry ו-exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            wait_time = 2 ** attempt * 5  # 5, 10, 20 שניות
+            if logger:
+                logger.warning(f"ניסיון {attempt + 1}/{max_retries} נכשל: {e}. ממתין {wait_time} שניות...")
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+            else:
+                raise
+
+
+# ─── שלב 0: סריקת תיקיית זום ────────────────────────────────────
+
+def scan_zoom_folder(zoom_path: str, processed: dict, logger: logging.Logger) -> list:
+    """סורק את תיקיית הזום ומחזיר רשימת הקלטות חדשות.
+
+    מחזיר: רשימה של dicts עם:
+      - folder_name: שם התיקייה
+      - audio_path: נתיב מלא לקובץ אודיו
+      - date: תאריך מחולץ או None
+    """
+    new_recordings = []
+    zoom_dir = Path(zoom_path)
+
+    if not zoom_dir.exists():
+        logger.error(f"תיקיית זום לא נמצאה: {zoom_path}")
+        return []
+
+    for item in sorted(zoom_dir.iterdir()):
+        # --- קבצי אודיו ישירות בתיקיית Zoom ---
+        if item.is_file() and item.suffix.lower() in ('.m4a', '.mp3'):
+            file_key = _normalize_path(str(item))
+            if file_key in processed:
+                continue
+            size_mb = item.stat().st_size / (1024 * 1024)
+            # שם התיקייה = שם הקובץ בלי סיומת
+            display_name = item.stem
+            new_recordings.append({
+                "folder_name": display_name,
+                "audio_path": _normalize_path(str(item)),
+                "audio_filename": item.name,
+                "date": extract_date_from_folder(display_name, str(item)),
+                "size_mb": round(size_mb, 1),
+            })
+            continue
+
+        # --- תת-תיקיות (המבנה הרגיל של Zoom) ---
+        if not item.is_dir():
+            continue
+
+        # מדלג על תיקיות מיוחדות
+        if item.name.startswith('.') or item.name in ('zoom-workflow', 'פרומפטים לחילוץ מתמלולים'):
+            continue
+
+        # מחפש קבצי אודיו בתיקייה
+        audio_files = list(item.glob("*.m4a")) + list(item.glob("*.mp3"))
+        if not audio_files:
+            continue
+
+        for audio_file in audio_files:
+            file_key = _normalize_path(str(audio_file))
+            if file_key in processed:
+                continue
+
+            # בודק גודל קובץ
+            size_mb = audio_file.stat().st_size / (1024 * 1024)
+
+            new_recordings.append({
+                "folder_name": item.name,
+                "audio_path": _normalize_path(str(audio_file)),
+                "audio_filename": audio_file.name,
+                "date": extract_date_from_folder(item.name, str(audio_file)),
+                "size_mb": round(size_mb, 1),
+            })
+
+    logger.info(f"נמצאו {len(new_recordings)} הקלטות חדשות מתוך סה\"כ תיקיות בזום")
+    return new_recordings
+
+
+# ─── שלב 1: תמלול עם Whisper ─────────────────────────────────────
+
+def _split_audio(audio_path: str, max_size_mb: float, logger: logging.Logger) -> list:
+    audio_path = os.path.expanduser(audio_path)
+    """מפצל קובץ אודיו גדול לחלקים קטנים באמצעות ffmpeg.
+
+    מחזיר רשימת נתיבים לקבצים המפוצלים (בתיקייה זמנית).
+    """
+    # בדיקה ש-ffmpeg מותקן
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        logger.error("ffmpeg לא מותקן! יש להתקין: brew install ffmpeg")
+        return []
+
+    # קבלת אורך הקובץ בשניות
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+        capture_output=True, text=True
+    )
+    total_duration = float(probe.stdout.strip())
+    file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+
+    # חישוב כמה חלקים צריך (מרווח ביטחון גדול בגלל bitrate משתנה)
+    num_chunks = int(file_size_mb / (max_size_mb * 0.55)) + 1
+    chunk_duration = total_duration / num_chunks
+
+    logger.info(f"מפצל {file_size_mb:.1f}MB ל-{num_chunks} חלקים ({chunk_duration:.0f} שניות כל אחד)")
+
+    tmp_dir = tempfile.mkdtemp(prefix="zoom_split_")
+    chunk_paths = []
+
+    for i in range(num_chunks):
+        start = i * chunk_duration
+        chunk_path = os.path.join(tmp_dir, f"chunk_{i:03d}.m4a")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-ss", str(start), "-t", str(chunk_duration),
+            "-c:a", "aac", "-b:a", "64k",  # קידוד מחדש ב-bitrate נמוך וקבוע
+            "-loglevel", "error",
+            chunk_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0 and os.path.exists(chunk_path):
+            chunk_size = os.path.getsize(chunk_path) / (1024 * 1024)
+            logger.info(f"  חלק {i+1}/{num_chunks}: {chunk_size:.1f}MB")
+            chunk_paths.append(chunk_path)
+        else:
+            logger.warning(f"  חלק {i+1} נכשל: {result.stderr}")
+
+    return chunk_paths
+
+
+def _transcribe_single(audio_path: str, client: OpenAI, config: dict, logger: logging.Logger) -> Optional[dict]:
+    audio_path = os.path.expanduser(audio_path)
+    """מתמלל קובץ אודיו בודד (עד 25MB) עם Whisper API."""
+
+    def do_transcribe():
+        with open(audio_path, "rb") as audio_file:
+            response = client.audio.transcriptions.create(
+                model=config.get("whisper_model", "whisper-1"),
+                file=audio_file,
+                response_format="verbose_json",
+                timestamp_granularities=["word"],
+            )
+        return response
+
+    try:
+        result = api_call_with_retry(do_transcribe, logger=logger)
+
+        transcript_text = result.text if hasattr(result, 'text') else ""
+        words = []
+        if hasattr(result, 'words') and result.words:
+            words = [{"word": w.word, "start": w.start, "end": w.end} for w in result.words]
+
+        detected_lang = result.language if hasattr(result, 'language') else None
+        return {
+            "transcript": transcript_text,
+            "words": words,
+            "whisper_language": detected_lang,
+        }
+
+    except Exception as e:
+        logger.error(f"שגיאת תמלול: {e}")
+        return None
+
+
+def transcribe_audio(audio_path: str, client: OpenAI, config: dict, logger: logging.Logger) -> Optional[dict]:
+    audio_path = os.path.expanduser(audio_path)
+    """מתמלל קובץ אודיו עם Whisper API כולל word-level timestamps.
+
+    אם הקובץ גדול מדי — מפצל אוטומטית עם ffmpeg ומתמלל כל חלק.
+    מחזיר: dict עם transcript (טקסט), words (רשימת מילים עם timestamps), language
+    """
+    size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+    max_size = config.get("max_audio_size_mb", 25)
+
+    # קובץ קטן — תמלול ישיר
+    if size_mb <= max_size:
+        logger.info(f"מתמלל: {os.path.basename(audio_path)} ({size_mb:.1f}MB)")
+        return _transcribe_single(audio_path, client, config, logger)
+
+    # קובץ גדול — פיצול ותמלול
+    logger.info(f"קובץ גדול ({size_mb:.1f}MB > {max_size}MB) — מפצל אוטומטית...")
+    chunk_paths = _split_audio(audio_path, max_size, logger)
+
+    if not chunk_paths:
+        logger.error("פיצול נכשל!")
+        return None
+
+    # תמלול כל חלק
+    all_transcript = []
+    all_words = []
+    detected_lang = None
+    time_offset = 0.0
+
+    for i, chunk_path in enumerate(chunk_paths):
+        logger.info(f"מתמלל חלק {i+1}/{len(chunk_paths)}...")
+        chunk_result = _transcribe_single(chunk_path, client, config, logger)
+
+        if chunk_result is None:
+            logger.warning(f"  חלק {i+1} — תמלול נכשל, ממשיך...")
+            continue
+
+        all_transcript.append(chunk_result["transcript"])
+
+        # עדכון timestamps — הוספת ההיסט של החלק הנוכחי
+        for w in chunk_result["words"]:
+            w["start"] += time_offset
+            w["end"] += time_offset
+            all_words.append(w)
+
+        if not detected_lang and chunk_result.get("whisper_language"):
+            detected_lang = chunk_result["whisper_language"]
+
+        # חישוב היסט לחלק הבא (מתוך אורך הקובץ)
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", chunk_path],
+                capture_output=True, text=True
+            )
+            time_offset += float(probe.stdout.strip())
+        except Exception:
+            # fallback: שימוש ב-timestamp של המילה האחרונה
+            if chunk_result["words"]:
+                time_offset = chunk_result["words"][-1]["end"]
+
+    # ניקוי קבצים זמניים
+    import shutil
+    tmp_dir = os.path.dirname(chunk_paths[0]) if chunk_paths else None
+    if tmp_dir and tmp_dir.startswith(tempfile.gettempdir()):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    combined_text = " ".join(all_transcript)
+    logger.info(f"תמלול הושלם: {len(combined_text)} תווים, {len(all_words)} מילים עם timestamps ({len(chunk_paths)} חלקים)")
+
+    return {
+        "transcript": combined_text,
+        "words": all_words,
+        "whisper_language": detected_lang,
+    }
+
+
+# ─── עזר: בחירת מודל לפי מסלול ────────────────────────────────────
+
+def _get_model_for_route(route_id: str, config: dict, default_model: str) -> str:
+    """מחזיר את המודל המתאים למסלול לפי config, או את ברירת המחדל."""
+    model_map = config.get("model_per_route", {})
+    return model_map.get(route_id, default_model)
+
+
+# ─── שלב 2: ניתוב ────────────────────────────────────────────────
+
+def route_transcript(transcript: str, file_name: str, prompts_dir: str,
+                     client: OpenAI, model: str, logger: logging.Logger,
+                     config: dict = None) -> Optional[dict]:
+    """מריץ פרומפט ניתוב ומחזיר route_id עם metadata."""
+
+    # בחירת מודל לניתוב
+    if config:
+        model = _get_model_for_route("_routing", config, model)
+    logger.info(f"  מודל לניתוב: {model}")
+
+    routing_prompt_path = os.path.join(prompts_dir, "routing.txt")
+    if not os.path.exists(routing_prompt_path):
+        logger.error(f"פרומפט ניתוב לא נמצא: {routing_prompt_path}")
+        return None
+
+    with open(routing_prompt_path, "r", encoding="utf-8") as f:
+        routing_system_prompt = f.read()
+
+    # בונה את הקלט לפרומפט הניתוב
+    user_message = f'file_name: "{file_name}"\n\ntranscript:\n{transcript}'
+
+    def do_route():
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": routing_system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content
+
+    try:
+        raw_response = api_call_with_retry(do_route, logger=logger)
+        routing_result = json.loads(raw_response)
+
+        display_name = routing_result.get("display_name", file_name)
+        routing_notes = routing_result.get("routing_notes", "")
+
+        # תמיכה בפורמט החדש (routes כרשימה) וגם בפורמט הישן (route_id בודד)
+        routes_raw = routing_result.get("routes", [])
+        if not routes_raw and routing_result.get("route_id"):
+            # פורמט ישן — המרה לרשימה
+            routes_raw = [{
+                "route_id": routing_result["route_id"],
+                "confidence": routing_result.get("confidence", 0),
+                "low_confidence": routing_result.get("low_confidence", False),
+                "evidence_excerpts": routing_result.get("evidence_excerpts", []),
+                "why": "",
+            }]
+
+        routes = []
+        for r in routes_raw:
+            rid = r.get("route_id", "other_general")
+            if rid not in VALID_ROUTE_IDS:
+                logger.warning(f"route_id לא מוכר: {rid}, מדלג")
+                continue
+            routes.append({
+                "route_id": rid,
+                "confidence": r.get("confidence", 0),
+                "low_confidence": r.get("low_confidence", False),
+                "evidence_excerpts": r.get("evidence_excerpts", []),
+                "why": r.get("why", ""),
+            })
+
+        if not routes:
+            routes = [{
+                "route_id": "other_general",
+                "confidence": 0.2,
+                "low_confidence": True,
+                "evidence_excerpts": [],
+                "why": "לא נמצאו מסלולים מתאימים",
+            }]
+
+        route_names = [r["route_id"] for r in routes]
+        logger.info(f"ניתוב: {', '.join(route_names)} (display: {display_name})")
+
+        return {
+            "routes": routes,
+            "display_name": display_name,
+            "routing_notes": routing_notes,
+        }
+
+    except Exception as e:
+        logger.error(f"שגיאת ניתוב: {e}")
+        return None
+
+
+# ─── עזר: הוספת timestamps לתמלול ──────────────────────────────────
+
+def format_transcript_with_timestamps(transcript: str, words: list) -> str:
+    """משלב word-level timestamps לתוך הטקסט של התמלול.
+
+    כל 30 שניות מוסיף סימון [HH:MM:SS] לפני המילה הקרובה ביותר.
+    אם אין מילים עם timestamps — מחזיר את הטקסט המקורי.
+    """
+    if not words:
+        return transcript
+
+    # בניית תמלול חדש עם timestamps כל 30 שניות
+    interval_seconds = 30
+    next_marker = 0.0
+    result_parts = []
+    last_timestamp_inserted = -1
+
+    for i, w in enumerate(words):
+        start = w.get("start", 0)
+        word_text = w.get("word", "")
+
+        # אם הגענו לנקודת ה-timestamp הבאה
+        if start >= next_marker:
+            hours = int(start // 3600)
+            minutes = int((start % 3600) // 60)
+            seconds = int(start % 60)
+            ts_label = f"[{hours:02d}:{minutes:02d}:{seconds:02d}]"
+            result_parts.append(f"\n{ts_label} ")
+            next_marker = start + interval_seconds
+
+        result_parts.append(word_text + " ")
+
+    timestamped_text = "".join(result_parts).strip()
+
+    # הוספת סיכום timestamps בראש המסמך
+    if words:
+        total_seconds = words[-1].get("end", 0)
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        header = f"[תמלול עם timestamps — אורך כולל: {hours} שעות ו-{minutes} דקות]\n\n"
+        return header + timestamped_text
+
+    return timestamped_text
+
+
+# ─── שלב 3: הרצת פרומפט ייעודי ──────────────────────────────────
+
+def run_target_prompt(transcript: str, file_name: str, route_id: str,
+                      prompts_dir: str, client: OpenAI, model: str,
+                      logger: logging.Logger, words: list = None,
+                      config: dict = None) -> dict:
+    """מריץ את הפרומפט הייעודי לפי route_id.
+
+    מחזיר: dict עם output_text (הפלט), is_error, error_reason
+    words: רשימת מילים עם timestamps מ-Whisper (אופציונלי)
+    config: הגדרות — משמש לבחירת מודל לפי מסלול
+    """
+
+    # בחירת מודל לפי מסלול
+    if config:
+        model = _get_model_for_route(route_id, config, model)
+    logger.info(f"  מודל למסלול {route_id}: {model}")
+
+    # other_general — סיכום קצר ללא פרומפט חיצוני
+    if route_id == "other_general":
+        return _generate_general_summary(transcript, file_name, client, model, logger)
+
+    # טוען פרומפט ייעודי
+    prompt_file = ROUTE_TO_PROMPT_FILE.get(route_id)
+    if not prompt_file:
+        return {"output_text": "", "is_error": True, "error_reason": f"אין פרומפט למסלול {route_id}"}
+
+    prompt_path = os.path.join(prompts_dir, prompt_file)
+    if not os.path.exists(prompt_path):
+        return {"output_text": "", "is_error": True, "error_reason": f"קובץ פרומפט חסר: {prompt_file}"}
+
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        system_prompt = f.read()
+
+    # שילוב timestamps בתמלול אם יש
+    if words:
+        timestamped_transcript = format_transcript_with_timestamps(transcript, words)
+        logger.info(f"תמלול עם timestamps: {len(timestamped_transcript)} תווים ({len(words)} מילים)")
+    else:
+        timestamped_transcript = transcript
+
+    # מסלולים שדורשים עיבוד רב-שלבי
+    MULTI_STEP_ROUTES = ("lesson_knowledge_rich",)
+
+    if route_id in MULTI_STEP_ROUTES:
+        return _run_multi_step_extraction(
+            timestamped_transcript, file_name, route_id,
+            system_prompt, client, model, logger
+        )
+
+    user_message = f'file_name: "{file_name}"\n\ntranscript:\n{timestamped_transcript}'
+
+    # פרומפטים שמחזירים טקסט (או טקסט + JSON בסוף)
+    # רק org_depth_extraction_for_content מחזיר JSON טהור
+    TEXT_OUTPUT_ROUTES = (
+        "implementation_work_session_email",
+        "internal_regular_email",
+        "org_characterization_post_sale",
+        "org_sales_prep_psych_persona",
+        "lesson_knowledge_rich",
+        "lesson_student_success_quotes",
+        "lesson_student_stories",
+    )
+    expects_json = route_id not in TEXT_OUTPUT_ROUTES
+
+    def do_process():
+        kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.2,
+        }
+        if expects_json:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content
+
+    try:
+        raw_output = api_call_with_retry(do_process, logger=logger)
+
+        # בדיקת שגיאה מהפרומפט עצמו (בדיקת סף)
+        if expects_json:
+            try:
+                parsed = json.loads(raw_output)
+                if parsed.get("error") == True or parsed.get("is_implementation") == False or \
+                   parsed.get("is_internal_regular") == False or parsed.get("is_characterization") == False:
+                    reason = parsed.get("reason", parsed.get("classification_reason", "הפרומפט זיהה אי-התאמה"))
+                    logger.warning(f"פרומפט יעד החזיר שגיאה: {reason}")
+                    return {
+                        "output_text": raw_output,
+                        "is_error": True,
+                        "error_reason": reason,
+                    }
+            except json.JSONDecodeError:
+                pass
+
+        # ניקוי תגי HTML מהפלט
+        raw_output = _clean_html_tags(raw_output)
+
+        logger.info(f"פרומפט יעד הושלם: {len(raw_output)} תווים")
+        return {"output_text": raw_output, "is_error": False, "error_reason": None}
+
+    except Exception as e:
+        logger.error(f"שגיאת פרומפט יעד: {e}")
+        return {"output_text": "", "is_error": True, "error_reason": str(e)}
+
+
+def _clean_html_tags(text: str) -> str:
+    """מנקה תגי HTML (כמו <br>) מטקסט פלט."""
+    # המרת <br>, <br/>, <br /> לשורה חדשה
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    # הסרת תגים אחרים
+    text = re.sub(r'</?(?:p|div|span|b|i|u|em|strong)[^>]*>', '', text, flags=re.IGNORECASE)
+    return text
+
+
+# ─── עיבוד רב-שלבי למסמך ידע עשיר ──────────────────────────────
+
+def _run_multi_step_extraction(transcript: str, file_name: str, route_id: str,
+                                original_prompt: str, client: OpenAI, model: str,
+                                logger: logging.Logger) -> dict:
+    """מריץ עיבוד רב-שלבי להפקת מסמך ידע עשיר.
+
+    שלב 1: זיהוי נושאים ומבנה כולל
+    שלב 2: העמקה בכל נושא (פרומפטים, תהליכים, טעויות, תובנות)
+    שלב 3: חילוץ רכיבים חוצי-נושאים (שאלות, מטפורות, רגעי וואו)
+    שלב 4: הרכבה סופית — מסמך ידע + JSON אינדקס
+    """
+    logger.info("🔄 מתחיל עיבוד רב-שלבי למסמך ידע...")
+
+    # ─── שלב 1: זיהוי נושאים ומבנה ───
+    logger.info("  שלב 1/4: זיהוי נושאים ומבנה כללי...")
+
+    step1_prompt = """אתה מנתח תמלולי שיעורים מתחום הבינה המלאכותית.
+קיבלת תמלול מלא של שיעור. המשימה שלך בשלב זה היא רק לזהות את המבנה:
+
+1. זהה את כל הנושאים המרכזיים שנדונו בשיעור (בדרך כלל 3-7 נושאים).
+2. לכל נושא, רשום: שם הנושא, טווח זמן, תיאור קצר, האם יש תהליכים/הדגמות/פרומפטים.
+3. זהה מטא-נתונים: כותרת השיעור, מספר השיעור, מחזור הקורס, שם המדריך/ה.
+4. תאר בפסקה אחת את הזרימה הלימודית הכללית.
+
+התעלם מדברי חולין, בדיחות, הפסקות, או חזרות לא מהותיות.
+חשוב: אם יש timestamps בתמלול, ציין אותם במדויק. אם אין — כתוב "לא זמין".
+
+החזר JSON בדיוק במבנה הבא (אל תשנה את שמות המפתחות):
+{
+  "metadata": {
+    "lesson_title": "כותרת השיעור או לא צוין בשיחה",
+    "lesson_number": null,
+    "course_cycle": null,
+    "instructor": "שם המדריך/ה או לא צוין בשיחה",
+    "language": "עברית"
+  },
+  "flow_summary": "פסקה אחת שמתארת את הזרימה הלימודית",
+  "topics": [
+    {
+      "name": "שם הנושא — חובה למלא שם תיאורי ומפורט",
+      "time_range": "00:05:00-00:25:00",
+      "description": "תיאור קצר במשפט אחד",
+      "has_processes": true,
+      "has_demos": false,
+      "has_prompts": true
+    }
+  ]
+}"""
+
+    step1_result = _api_call_json(client, model, step1_prompt, transcript, file_name, logger)
+    if not step1_result:
+        logger.error("  שלב 1 נכשל!")
+        return {"output_text": "", "is_error": True, "error_reason": "שלב 1 (זיהוי נושאים) נכשל"}
+
+    topics = step1_result.get("topics", [])
+    metadata = step1_result.get("metadata", {})
+    flow_summary = step1_result.get("flow_summary", "")
+    logger.info(f"  זוהו {len(topics)} נושאים: {[t.get('name', '') for t in topics]}")
+
+    # ─── שלב 2: העמקה בכל נושא ───
+    logger.info(f"  שלב 2/4: העמקה ב-{len(topics)} נושאים...")
+
+    deep_topics = []
+    for i, topic in enumerate(topics):
+        topic_name = topic.get("name", f"נושא {i+1}")
+        logger.info(f"    מעמיק בנושא {i+1}/{len(topics)}: {topic_name}")
+
+        step2_prompt = f"""אתה עורך ידע הדרכתי מומחה. קיבלת תמלול של שיעור AI.
+
+המשימה שלך: התמקד **רק** בנושא "{topic_name}" וחלץ ממנו את כל הערך.
+{f'טווח זמן משוער: {topic.get("time_range", "לא ידוע")}' if topic.get("time_range") else ''}
+{f'תיאור: {topic.get("description", "")}' if topic.get("description") else ''}
+
+חלץ את הפריטים הבאים (כתוב כל אחד בעומק, לא רשימות יבשות):
+
+1. תמצית הנושא — 3-5 פסקאות שמסכמות את עיקרי הדיון, ההדגמות, התובנות והיישומים.
+   כתוב כמו תוכן לימודי אמיתי, לא סיכום יבש.
+
+2. תהליכים ושיטות — כל תהליך שלב-אחר-שלב שהודגם או הוסבר.
+   כלול דגשים חשובים ואזהרות.
+
+3. פרומפטים — הניסוח המדויק של כל פרומפט שהוקרא או הוקלד.
+   אם פרומפט לא הוזכר במלואו, כתוב בעצמך פרומפט ממוטב.
+   חובה: לכל פרומפט ציין מקור — "תמלול" או "העשרה".
+
+4. כלים וטכניקות — כל כלי, אתר, או שיטת עבודה שהוזכרו.
+
+5. טעויות נפוצות ותיקונים — טעויות שהודגשו, ואיך לתקן.
+   חובה: ציין מקור — "תמלול" או "העשרה".
+
+6. תובנות ורגעי וואו — ניסוחים עוצמתיים, ציטוטים מדויקים עם timestamps.
+
+7. דוגמאות לפני ואחרי — אם הודגמו תהליכי שיפור או השוואות.
+
+8. סוג הערך — השראה / הדרכה / יישום / חשיבה חדשה / חיזוק מקצועי
+
+9. תגים — מילות מפתח בעברית.
+
+חשוב:
+- כתוב בעברית, בטון הדרכתי עשיר וברור.
+- ציטוטים חייבים להיות מדויקים.
+- אם יש timestamps בתמלול, ציין אותם.
+
+חובה: החזר JSON בדיוק במבנה הבא. אל תשנה את שמות המפתחות באנגלית:
+{{
+  "summary": "3-5 פסקאות תמצית הנושא כטקסט רציף",
+  "processes": [
+    {{
+      "name": "שם התהליך",
+      "steps": ["שלב 1", "שלב 2"],
+      "notes": "דגשים ואזהרות",
+      "time_start": "HH:MM:SS",
+      "time_end": "HH:MM:SS"
+    }}
+  ],
+  "prompts": [
+    {{
+      "prompt_text": "הניסוח המדויק",
+      "source": "תמלול או העשרה",
+      "timestamp": "HH:MM:SS או לא זמין"
+    }}
+  ],
+  "tools": [
+    {{
+      "name": "שם הכלי",
+      "description": "תיאור ואיך השתמשו",
+      "tips": "טיפים חשובים"
+    }}
+  ],
+  "mistakes": [
+    {{
+      "mistake": "תיאור הטעות",
+      "fix": "איך לתקן",
+      "source": "תמלול או העשרה"
+    }}
+  ],
+  "wow_moments": [
+    {{
+      "line": "ציטוט מדויק",
+      "why_it_matters": "למה זה חשוב",
+      "time_start": "HH:MM:SS",
+      "time_end": "HH:MM:SS"
+    }}
+  ],
+  "before_after": [
+    {{
+      "description": "תיאור ההשוואה",
+      "time_start": "HH:MM:SS",
+      "time_end": "HH:MM:SS"
+    }}
+  ],
+  "value_type": "השראה / הדרכה / יישום / חשיבה חדשה / חיזוק מקצועי",
+  "tags": ["תג1", "תג2"]
+}}"""
+
+        topic_result = _api_call_json(client, model, step2_prompt, transcript, file_name, logger)
+        if topic_result:
+            topic_result["topic_name"] = topic_name
+            topic_result["topic_index"] = i + 1
+            topic_result["time_range"] = topic.get("time_range", "")
+            deep_topics.append(topic_result)
+        else:
+            logger.warning(f"    נושא {topic_name} — העמקה נכשלה")
+
+    # ─── שלב 3: רכיבים חוצי-נושאים ───
+    logger.info("  שלב 3/4: חילוץ רכיבים חוצי-נושאים...")
+
+    step3_prompt = """אתה עורך ידע הדרכתי. קיבלת תמלול של שיעור AI.
+
+המשימה: חלץ רכיבים שחוצים את כל הנושאים של השיעור:
+
+1. תובנות על-נושאיות — עקרונות או רעיונות שנגעו בכמה נושאים.
+2. שאלות ותשובות מרכזיות — עד 10 שאלות בלבד. רק מהותיות.
+3. דימויים ומטפורות זכירות.
+4. רגעים רגשיים או אנושיים — עם ציטוט מדויק ו-timestamp.
+5. עקרונות פעולה ישימים.
+6. הקשרים מומלצים לשימוש — מתי וכיצד להיעזר בתוכן.
+7. highlight לשיווק — takeaways, משפטים זכירים, סיפורים חזקים.
+
+חשוב: ציטוטים חייבים להיות מדויקים כפי שנאמרו. ציין timestamps.
+
+חובה: החזר JSON בדיוק במבנה הבא. אל תשנה את שמות המפתחות:
+{
+  "cross_topic_insights": [
+    {"insight": "תיאור התובנה", "related_topics": ["נושא 1", "נושא 2"]}
+  ],
+  "q_and_a": [
+    {"question": "השאלה", "answer": "התשובה", "timestamp": "HH:MM:SS או לא זמין"}
+  ],
+  "metaphors": [
+    {"metaphor": "הדימוי או המטפורה", "explanation": "מה הרעיון שהועבר"}
+  ],
+  "emotional_moments": [
+    {"description": "תיאור הרגע", "quote": "ציטוט מדויק", "time_start": "HH:MM:SS", "time_end": "HH:MM:SS"}
+  ],
+  "action_principles": [
+    {"principle": "עקרון הפעולה", "how_to_apply": "איך ליישם"}
+  ],
+  "usage_contexts": [
+    {"context": "מתי להשתמש", "description": "פירוט"}
+  ],
+  "content_marketing_highlights": {
+    "top_takeaways": ["takeaway 1", "takeaway 2"],
+    "top_memorable_lines": ["משפט 1", "משפט 2"],
+    "top_stories_or_examples": [
+      {"story": "תיאור הסיפור", "time_start": "HH:MM:SS", "time_end": "HH:MM:SS"}
+    ]
+  }
+}"""
+
+    cross_topics = _api_call_json(client, model, step3_prompt, transcript, file_name, logger)
+
+    # ─── שלב 4: הרכבה סופית ───
+    logger.info("  שלב 4/4: הרכבה סופית של מסמך הידע...")
+
+    # בניית הפלט המלא
+    assembled = _assemble_knowledge_doc(metadata, flow_summary, deep_topics, cross_topics, original_prompt, logger)
+
+    # ניקוי HTML
+    assembled = _clean_html_tags(assembled)
+
+    logger.info(f"✅ עיבוד רב-שלבי הושלם: {len(assembled)} תווים")
+    return {"output_text": assembled, "is_error": False, "error_reason": None}
+
+
+def _clean_timestamps(obj):
+    """מנקה שדות time_start/time_end מטקסט מיותר שהמודל מוסיף.
+    למשל: '00:05:18 — מתי התחילו להסביר' → '00:05:18'
+    """
+    ts_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2})')
+
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if key in ("time_start", "time_end", "timestamp") and isinstance(val, str):
+                match = ts_pattern.match(val.strip())
+                if match:
+                    obj[key] = match.group(1)
+            else:
+                _clean_timestamps(val)
+    elif isinstance(obj, list):
+        for item in obj:
+            _clean_timestamps(item)
+    return obj
+
+
+def _api_call_json(client: OpenAI, model: str, system_prompt: str,
+                   transcript: str, file_name: str, logger: logging.Logger) -> Optional[dict]:
+    """קריאת API שמחזירה JSON מפורסס."""
+
+    user_message = f'file_name: "{file_name}"\n\ntranscript:\n{transcript}'
+
+    def do_call():
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content
+
+    try:
+        raw = api_call_with_retry(do_call, logger=logger)
+        parsed = json.loads(raw)
+        return _clean_timestamps(parsed)
+    except Exception as e:
+        logger.error(f"שגיאה בקריאת API: {e}")
+        return None
+
+
+def _assemble_knowledge_doc(metadata: dict, flow_summary: str,
+                             deep_topics: list, cross_topics: Optional[dict],
+                             original_prompt: str, logger: logging.Logger) -> str:
+    """מרכיב את כל חלקי העיבוד הרב-שלבי למסמך ידע אחד + JSON אינדקס."""
+
+    sections = []
+
+    # ─── מטא-נתונים ───
+    sections.append("מטא-נתונים")
+    sections.append(f"כותרת השיעור: {metadata.get('lesson_title', 'לא צוין בשיחה')}")
+    if metadata.get('lesson_number'):
+        sections.append(f"מספר שיעור: {metadata['lesson_number']}")
+    if metadata.get('course_cycle'):
+        sections.append(f"מחזור: {metadata['course_cycle']}")
+    sections.append(f"מדריך/ה: {metadata.get('instructor', 'לא צוין בשיחה')}")
+    sections.append(f"שפת השיעור: {metadata.get('language', 'עברית')}")
+
+    topic_names = [t.get('topic_name', '') for t in deep_topics]
+    if topic_names:
+        sections.append(f"נושאים מרכזיים: {', '.join(topic_names)}")
+
+    sections.append("")
+
+    # ─── תקציר כללי ───
+    sections.append("תקציר כללי של השיעור")
+    sections.append(flow_summary if flow_summary else "לא זמין")
+    sections.append("")
+
+    # ─── פירוט לפי נושאים ───
+    all_prompts = []
+    all_mistakes = []
+    all_wow = []
+    all_before_after = []
+    all_tools = []
+    all_processes = []
+    all_qa = []
+
+    for topic in deep_topics:
+        idx = topic.get("topic_index", "")
+        name = topic.get("topic_name", "")
+        time_range = topic.get("time_range", "")
+
+        sections.append(f"נושא {idx} — {name}")
+        if time_range:
+            sections.append(f"טווח זמן: {time_range}")
+        sections.append("")
+
+        # תמצית
+        summary = topic.get("summary", topic.get("topic_summary", ""))
+        if summary:
+            sections.append("תמצית הנושא")
+            if isinstance(summary, list):
+                sections.extend(summary)
+            else:
+                sections.append(summary)
+            sections.append("")
+
+        # תהליכים
+        processes = topic.get("processes", topic.get("processes_step_by_step", []))
+        if processes:
+            sections.append("תהליכים ושיטות שהוצגו")
+            for proc in processes:
+                if isinstance(proc, dict):
+                    proc_name = proc.get("name", proc.get("process_name", ""))
+                    sections.append(f"תהליך: {proc_name}")
+                    steps = proc.get("steps", [])
+                    for j, step in enumerate(steps, 1):
+                        sections.append(f"  {j}. {step}")
+                    if proc.get("notes") or proc.get("warnings"):
+                        sections.append(f"  דגשים: {proc.get('notes', proc.get('warnings', ''))}")
+                    if proc.get('time_start') and proc.get('time_end'):
+                        sections.append(f"  זמן: {proc['time_start']} — {proc['time_end']}")
+                    all_processes.append(proc)
+                else:
+                    sections.append(f"- {proc}")
+            sections.append("")
+
+        # פרומפטים
+        prompts = topic.get("prompts", topic.get("prompts_mentioned", []))
+        if prompts:
+            sections.append("פרומפטים")
+            for pr in prompts:
+                if isinstance(pr, dict):
+                    text = pr.get("prompt_text", pr.get("text", ""))
+                    source = pr.get("source", "תמלול")
+                    ts = pr.get("timestamp", "")
+                    sections.append(f"פרומפט: {text}")
+                    sections.append(f"  מקור: {source}")
+                    if ts:
+                        sections.append(f"  timestamp: {ts}")
+                    all_prompts.append(pr)
+                else:
+                    sections.append(f"- {pr}")
+            sections.append("")
+
+        # כלים וטכניקות
+        tools = topic.get("tools", topic.get("tools_and_techniques", []))
+        if tools:
+            sections.append("כלים וטכניקות")
+            for tool in tools:
+                if isinstance(tool, dict):
+                    sections.append(f"- {tool.get('name', tool.get('tool', ''))}: {tool.get('description', tool.get('usage', ''))}")
+                    if tool.get('tips'):
+                        sections.append(f"  טיפים: {tool['tips']}")
+                    all_tools.append(tool)
+                else:
+                    sections.append(f"- {tool}")
+            sections.append("")
+
+        # טעויות
+        mistakes = topic.get("mistakes", topic.get("common_mistakes", []))
+        if mistakes:
+            sections.append("טעויות נפוצות והמלצות לתיקון")
+            for m in mistakes:
+                if isinstance(m, dict):
+                    sections.append(f"טעות: {m.get('mistake', m.get('error', ''))}")
+                    sections.append(f"  תיקון: {m.get('fix', m.get('correction', ''))}")
+                    sections.append(f"  מקור: {m.get('source', 'תמלול')}")
+                    all_mistakes.append(m)
+                else:
+                    sections.append(f"- {m}")
+            sections.append("")
+
+        # תובנות ורגעי וואו
+        wow = topic.get("wow_moments", topic.get("insights", []))
+        if wow:
+            sections.append("תובנות, רגעי וואו ומשפטים זכירים")
+            for w in wow:
+                if isinstance(w, dict):
+                    sections.append(f"- {w.get('line', w.get('insight', w.get('text', '')))}")
+                    if w.get('why_it_matters'):
+                        sections.append(f"  למה זה חשוב: {w['why_it_matters']}")
+                    if w.get('time_start') and w.get('time_end'):
+                        sections.append(f"  זמן: {w['time_start']} — {w['time_end']}")
+                    elif w.get('timestamp'):
+                        sections.append(f"  timestamp: {w['timestamp']}")
+                    all_wow.append(w)
+                else:
+                    sections.append(f"- {w}")
+            sections.append("")
+
+        # לפני ואחרי
+        before_after = topic.get("before_after", topic.get("before_after_examples", []))
+        if before_after:
+            sections.append("דוגמאות לפני ואחרי")
+            for ba in before_after:
+                if isinstance(ba, dict):
+                    sections.append(f"- {ba.get('description', ba.get('example', ''))}")
+                    if ba.get('time_start') and ba.get('time_end'):
+                        sections.append(f"  זמן: {ba['time_start']} — {ba['time_end']}")
+                    all_before_after.append(ba)
+                else:
+                    sections.append(f"- {ba}")
+            sections.append("")
+
+        # סוג ערך ותגים
+        value_type = topic.get("value_type", "")
+        if value_type:
+            sections.append(f"סוג הערך: {value_type}")
+
+        tags = topic.get("tags", [])
+        if tags:
+            sections.append(f"תגים: {', '.join(tags) if isinstance(tags, list) else tags}")
+
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+
+    # ─── רכיבים חוצי-נושאים ───
+    if cross_topics:
+        # תובנות על-נושאיות
+        cross_insights = cross_topics.get("cross_topic_insights", [])
+        if cross_insights:
+            sections.append("תובנות על-נושאיות (חוצות נושאים)")
+            for ci in cross_insights:
+                if isinstance(ci, dict):
+                    sections.append(f"- {ci.get('insight', ci.get('text', ''))}")
+                else:
+                    sections.append(f"- {ci}")
+            sections.append("")
+
+        # שאלות ותשובות
+        qa = cross_topics.get("q_and_a", cross_topics.get("questions_and_answers", []))
+        if qa:
+            sections.append("שאלות ותשובות מרכזיות")
+            for q in qa:
+                if isinstance(q, dict):
+                    sections.append(f"שאלה: {q.get('question', '')}")
+                    sections.append(f"תשובה: {q.get('answer', q.get('answer_summary', ''))}")
+                    sections.append("")
+                    all_qa.append(q)
+            sections.append("")
+
+        # דימויים
+        metaphors = cross_topics.get("metaphors", cross_topics.get("metaphors_and_analogies", []))
+        if metaphors:
+            sections.append("דימויים, אנלוגיות ומטפורות")
+            for m in metaphors:
+                if isinstance(m, dict):
+                    sections.append(f"- {m.get('metaphor', m.get('text', ''))}: {m.get('explanation', '')}")
+                else:
+                    sections.append(f"- {m}")
+            sections.append("")
+
+        # רגעים רגשיים
+        emotional = cross_topics.get("emotional_moments", [])
+        if emotional:
+            sections.append("רגעים רגשיים ואנושיים")
+            for e in emotional:
+                if isinstance(e, dict):
+                    sections.append(f"- {e.get('description', e.get('text', ''))}")
+                    if e.get('quote'):
+                        sections.append(f'  ציטוט: "{e["quote"]}"')
+                    if e.get('time_start') and e.get('time_end'):
+                        sections.append(f"  זמן: {e['time_start']} — {e['time_end']}")
+                    elif e.get('timestamp'):
+                        sections.append(f"  timestamp: {e['timestamp']}")
+                else:
+                    sections.append(f"- {e}")
+            sections.append("")
+
+        # עקרונות פעולה
+        action_principles = cross_topics.get("action_principles", [])
+        if action_principles:
+            sections.append("עקרונות פעולה ישימים")
+            for ap in action_principles:
+                if isinstance(ap, dict):
+                    sections.append(f"- {ap.get('principle', ap.get('text', ''))}")
+                else:
+                    sections.append(f"- {ap}")
+            sections.append("")
+
+        # הקשרים לשימוש
+        usage = cross_topics.get("usage_contexts", cross_topics.get("recommended_usage", []))
+        if usage:
+            sections.append("מתי להשתמש במסמך זה")
+            for u in usage:
+                if isinstance(u, dict):
+                    sections.append(f"- {u.get('context', u.get('text', ''))}")
+                else:
+                    sections.append(f"- {u}")
+            sections.append("")
+
+        # highlights שיווקיים
+        highlights = cross_topics.get("content_marketing_highlights", cross_topics.get("marketing_highlights", {}))
+        if highlights and isinstance(highlights, dict):
+            takeaways = highlights.get("top_takeaways", [])
+            memorable = highlights.get("top_memorable_lines", [])
+            stories = highlights.get("top_stories_or_examples", [])
+
+            if takeaways or memorable or stories:
+                sections.append("דגשים לשיווק תוכן")
+                if takeaways:
+                    sections.append("Takeaways מרכזיים:")
+                    for t in takeaways:
+                        sections.append(f"  - {t}")
+                if memorable:
+                    sections.append("משפטים זכירים:")
+                    for m in memorable:
+                        sections.append(f'  - "{m}"')
+                if stories:
+                    sections.append("סיפורים/דוגמאות חזקות:")
+                    for s in stories:
+                        if isinstance(s, dict):
+                            sections.append(f"  - {s.get('story', '')}")
+                            if s.get('time_start') and s.get('time_end'):
+                                sections.append(f"    זמן: {s['time_start']} — {s['time_end']}")
+                        else:
+                            sections.append(f"  - {s}")
+                sections.append("")
+
+    # ─── תגים כוללים ───
+    all_tags = set()
+    for topic in deep_topics:
+        tags = topic.get("tags", [])
+        if isinstance(tags, list):
+            all_tags.update(tags)
+
+    if all_tags:
+        sections.append(f"תגים כוללים: {', '.join(all_tags)}")
+        sections.append("")
+
+    # ─── בניית הטקסט המלא ───
+    text_doc = "\n".join(sections)
+
+    # ─── בניית JSON אינדקס ───
+    json_index = {
+        "file_name": None,
+        "has_timestamps": True,
+        "brief_text_reference": "מסמך הידע מופיע מעל, זה אינדקס בלבד",
+        "index": {
+            "lesson_title_as_said": metadata.get("lesson_title"),
+            "course_cycle_as_said": metadata.get("course_cycle"),
+            "lesson_number_as_said": metadata.get("lesson_number"),
+            "main_topics": [t.get("topic_name", "") for t in deep_topics],
+            "processes_step_by_step": all_processes[:20],
+            "prompts": all_prompts[:20],
+            "tools_techniques_tips": all_tools[:20],
+            "common_mistakes_and_fixes": all_mistakes[:20],
+            "wow_moments_and_memorable_lines": all_wow[:20],
+            "before_after_examples": all_before_after[:10],
+            "q_and_a_central": all_qa[:10],
+            "metaphors_and_analogies": cross_topics.get("metaphors", [])[:10] if cross_topics else [],
+            "emotional_or_human_moments": cross_topics.get("emotional_moments", [])[:10] if cross_topics else [],
+            "content_marketing_highlights": cross_topics.get("content_marketing_highlights", {}) if cross_topics else {},
+            "recommended_usage_contexts_as_said": cross_topics.get("usage_contexts", [])[:10] if cross_topics else [],
+            "overall_tags": list(all_tags),
+        }
+    }
+
+    # חיבור: טקסט + JSON
+    full_output = text_doc + "\n\nJSON\n" + json.dumps(json_index, ensure_ascii=False, indent=2)
+
+    return full_output
+
+
+def _generate_general_summary(transcript: str, file_name: str,
+                               client: OpenAI, model: str, logger: logging.Logger) -> dict:
+    """מייצר סיכום קצר למסלול other_general."""
+
+    system_prompt = """אתה מקבל תמלול של פגישה שלא נכנסת לאף קטגוריה ייעודית.
+כתוב סיכום קצר של 3-5 משפטים בעברית שמתאר:
+1. על מה הייתה הפגישה
+2. מי השתתף (אם ניתן לזהות)
+3. למה היא לא נכנסת לקטגוריות: הטמעה, פנימית, מכירה ארגונית, אפיון, חילוץ עומק, שיעור
+כתוב בסגנון תמציתי ועובדתי."""
+
+    user_message = f'file_name: "{file_name}"\n\ntranscript:\n{transcript[:8000]}'
+
+    def do_summarize():
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.3,
+        )
+        return response.choices[0].message.content
+
+    try:
+        summary = api_call_with_retry(do_summarize, logger=logger)
+        return {"output_text": summary, "is_error": False, "error_reason": None}
+    except Exception as e:
+        logger.error(f"שגיאת סיכום כללי: {e}")
+        return {"output_text": "", "is_error": True, "error_reason": str(e)}
+
+
+# ─── שלב 4: המרת JSON לתוכן Notion קריא ─────────────────────────
+
+def format_output_for_notion(output_text: str, route_id: str) -> str:
+    """ממיר את הפלט לפורמט Notion markdown קריא.
+
+    רוב הפרומפטים מחזירים טקסט מפורמט (TEXT_OUTPUT_ROUTES) — מועבר כמו שהוא.
+    JSON טהור (כמו org_depth_extraction_for_content) — ממיר למרקדאון קריא.
+    """
+    # קודם ננסה JSON — רלוונטי בעיקר ל-org_depth_extraction_for_content
+    try:
+        data = json.loads(output_text)
+        return _json_to_notion_markdown(data, route_id)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # טקסט מפורמט — כבר מוכן, מעבירים כמו שהוא
+    return output_text
+
+
+def _json_to_notion_markdown(data: dict, route_id: str) -> str:
+    """ממיר JSON מובנה למרקדאון קריא ב-Notion."""
+    sections = []
+
+    if route_id == "org_sales_prep_psych_persona":
+        sections.append("# ניתוח שיחת מכירה ארגונית")
+
+        # שלב 1 — חילוץ צורך
+        s1 = data.get("stage1_conversation_extraction", {})
+        if s1:
+            sections.append("\n## חילוץ צורך מהשיחה")
+            svc = s1.get("requested_service_or_product", {})
+            if svc.get("text_as_said"):
+                sections.append(f"**שירות/מוצר:** {svc['text_as_said']}")
+
+            needs = s1.get("needs_pains_goals", [])
+            if needs:
+                sections.append("\n**צרכים, כאבים, מטרות:**")
+                for n in needs:
+                    sections.append(f"- **{n.get('type', '')}**: {n.get('text_as_said', '')}")
+
+            wm = s1.get("what_matters_most", {})
+            if wm.get("priority"):
+                sections.append(f"\n**מה חשוב להם:** {wm['priority']} — {wm.get('reason_as_said', '')}")
+
+        # שלב 2 — מקבל החלטה
+        s2 = data.get("stage2_decision_maker", {})
+        if s2:
+            sections.append("\n## מקבל ההחלטה")
+            sections.append(f"**האם הדובר מקבל ההחלטה:** {s2.get('is_speaker_final_decision_maker', 'לא ידוע')}")
+            sections.append(f"**תפקיד משוער:** {s2.get('decision_maker_role_guess', 'לא ידוע')}")
+            style = s2.get("communication_style_recommendation", {})
+            if style.get("style"):
+                sections.append(f"**סגנון תקשורת מומלץ:** {style['style']} — {style.get('why', '')}")
+            sections.append(f"**ביטחון:** {s2.get('confidence', 0)}")
+
+        # שלב 3 — פרסונה
+        s3 = data.get("stage3_persona_choice", {})
+        if s3:
+            sections.append("\n## פרסונה פסיכולוגית")
+            sections.append(f"**פרסונה שנבחרה:** {s3.get('persona_selected', '')}")
+            sections.append(f"**נימוק:** {s3.get('persona_fit_reasoning', '')}")
+            sections.append(f"**ביטחון:** {s3.get('confidence', 0)}")
+
+        # שלב 4 — ניתוח עומק
+        s4 = data.get("stage4_persona_based_analysis", {})
+        if s4:
+            sections.append("\n## ניתוח עומק")
+
+            journey = s4.get("psychological_journey", [])
+            if journey:
+                sections.append("\n**מסע פסיכולוגי:**")
+                for p in journey:
+                    sections.append(f"- {p.get('point', '')} *(מקור: {p.get('source_type', '')})*")
+
+            triggers = s4.get("triggers_and_needs", [])
+            if triggers:
+                sections.append("\n**טריגרים וצרכים:**")
+                for t in triggers:
+                    sections.append(f"- {t.get('trigger_or_need', '')}")
+
+            objections = s4.get("objections_and_blocks", [])
+            if objections:
+                sections.append("\n**התנגדויות וחסמים:**")
+                for o in objections:
+                    sections.append(f"- **{o.get('objection', '')}** → {o.get('preempt_or_reduce', '')}")
+
+        # תקציב
+        budget = data.get("budget_and_pricing_as_said", [])
+        if budget:
+            sections.append("\n## תקציב ומחיר")
+            for b in budget:
+                if b.get("detail_as_said"):
+                    sections.append(f"- {b['detail_as_said']}")
+
+        # שאלות חסרות
+        missing = data.get("missing_info_questions", [])
+        if missing and any(m for m in missing if m):
+            sections.append("\n## שאלות השלמה")
+            for q in missing:
+                if q:
+                    sections.append(f"- {q}")
+
+    elif route_id == "org_characterization_post_sale":
+        sections.append("# אפיון לאחר סגירה")
+        _add_json_fields_recursively(data, sections, skip_keys=["file_name", "is_characterization"])
+
+    elif route_id == "org_depth_extraction_for_content":
+        sections.append("# חילוץ תוכן לשימוש חוזר")
+
+        meta = data.get("conversation_metadata", {})
+        if meta:
+            sections.append(f"\n## מטאדאטה")
+            if meta.get("organization_name"):
+                sections.append(f"**ארגון:** {meta['organization_name']}")
+            if meta.get("organization_description_as_said"):
+                sections.append(f"**תיאור:** {meta['organization_description_as_said']}")
+
+        snap = data.get("top_context_snapshot", {})
+        if snap:
+            sections.append(f"\n## הקשר מרכזי")
+            if snap.get("stated_goal_of_conversation"):
+                sections.append(f"**מטרת השיחה:** {snap['stated_goal_of_conversation']}")
+            topics_list = snap.get("main_topics_as_said", [])
+            if topics_list:
+                sections.append("**נושאים:**")
+                for t in topics_list:
+                    sections.append(f"- {t}")
+
+        def _ts_range(item):
+            s = item.get("start_timestamp", "")
+            e = item.get("end_timestamp", "")
+            if s and e:
+                return f"[{s} → {e}]"
+            elif s:
+                return f"[{s}]"
+            return ""
+
+        quotes = data.get("key_quotes", [])
+        if quotes:
+            sections.append("\n## ציטוטים מרכזיים")
+            for q in quotes:
+                ts = _ts_range(q)
+                sections.append(f'- {ts} "{q.get("quote_text", "")}" — {q.get("who_said_it", "")} *({q.get("why_key_in_2_3_words", "")})*')
+
+        stories = data.get("stories_and_anecdotes", [])
+        if stories:
+            sections.append("\n## סיפורים ואנקדוטות")
+            for s in stories:
+                ts = _ts_range(s)
+                sections.append(f'- {ts} **{s.get("story_type", "")}**: {s.get("story_summary", "")} ({s.get("emotional_tone", "")})')
+
+        breakthroughs = data.get("breakthrough_moments", [])
+        if breakthroughs:
+            sections.append("\n## רגעי פריצת דרך")
+            for b in breakthroughs:
+                ts = _ts_range(b)
+                sections.append(f'- {ts} {b.get("moment_description", "")} → {b.get("what_changed", "")}')
+
+        emotions = data.get("emotional_moments", [])
+        if emotions:
+            sections.append("\n## רגעים רגשיים")
+            for e in emotions:
+                ts = _ts_range(e)
+                sections.append(f'- {ts} **{e.get("emotion_label", "")}** ({e.get("intensity", "")}): {e.get("moment_description", "")}')
+
+        insights = data.get("professional_insights", [])
+        if insights:
+            sections.append("\n## תובנות מקצועיות")
+            for i in insights:
+                ts = _ts_range(i)
+                sections.append(f'- {ts} {i.get("insight_text", "")} — {i.get("who_said_it", "")}')
+
+        patterns = data.get("organizational_patterns", [])
+        if patterns:
+            sections.append("\n## דפוסים ארגוניים")
+            for p in patterns:
+                ts = _ts_range(p)
+                sections.append(f'- {ts} **{p.get("depth_type", "")}**: {p.get("pattern_description", "")}')
+
+        ba = data.get("before_after_moments", [])
+        if ba:
+            sections.append("\n## רגעי לפני/אחרי")
+            for b in ba:
+                ts = _ts_range(b)
+                sections.append(f'- {ts} **לפני:** {b.get("before_state", "")} → **אחרי:** {b.get("after_state", "")}')
+
+    elif route_id == "lesson_knowledge_rich":
+        sections.append("# מסמך ידע עשיר משיעור")
+
+        meta = data.get("lesson_metadata", {})
+        if meta:
+            if meta.get("lesson_title"):
+                sections.append(f"\n**כותרת:** {meta['lesson_title']}")
+            if meta.get("instructor_names"):
+                sections.append(f"**מדריך/ה:** {', '.join(meta['instructor_names'])}")
+
+        summary = data.get("overall_summary", {})
+        if summary:
+            sections.append("\n## סיכום כללי")
+            if summary.get("main_topic"):
+                sections.append(f"**נושא מרכזי:** {summary['main_topic']}")
+            if summary.get("lesson_goal"):
+                sections.append(f"**מטרת השיעור:** {summary['lesson_goal']}")
+            if summary.get("central_insight"):
+                sections.append(f"**תובנה מרכזית:** {summary['central_insight']}")
+
+        topics = data.get("topics", [])
+        for topic in topics:
+            sections.append(f"\n## {topic.get('topic_name', 'נושא')}")
+            if topic.get("topic_summary"):
+                sections.append(topic["topic_summary"])
+
+            processes = topic.get("processes_step_by_step", [])
+            if processes:
+                sections.append("\n**תהליכים:**")
+                for proc in processes:
+                    sections.append(f"\n***{proc.get('process_name', '')}***")
+                    for step in proc.get("steps", []):
+                        sections.append(f"  - {step}")
+
+            prompts = topic.get("prompts_mentioned", [])
+            if prompts:
+                sections.append("\n**פרומפטים:**")
+                for pr in prompts:
+                    source = f"({pr.get('source', 'תמלול')})" if pr.get("source") else ""
+                    sections.append(f"- `{pr.get('prompt_text', '')}` {source}")
+
+            mistakes = topic.get("common_mistakes_and_fixes", [])
+            if mistakes:
+                sections.append("\n**טעויות ותיקונים:**")
+                for m in mistakes:
+                    sections.append(f"- **טעות:** {m.get('mistake', '')} → **תיקון:** {m.get('fix', '')}")
+
+            qa = topic.get("q_and_a_central", [])
+            if qa:
+                sections.append("\n**שאלות ותשובות:**")
+                for item in qa:
+                    sections.append(f"- **ש:** {item.get('question', '')}")
+                    sections.append(f"  **ת:** {item.get('answer_summary', '')}")
+
+    elif route_id == "lesson_student_success_quotes":
+        sections.append("# ציטוטי הצלחה של תלמידים")
+
+        quotes = data.get("quotes", [])
+        if data.get("none_found"):
+            sections.append("\nלא נמצאו ציטוטי הצלחה בתמלול זה.")
+        elif quotes:
+            sections.append(f"\nנמצאו {data.get('quotes_count', len(quotes))} ציטוטים:")
+            for i, q in enumerate(quotes, 1):
+                sections.append(f"\n### ציטוט {i}")
+                sections.append(f'> "{q.get("quote_text", "")}"')
+                if q.get("speaker_name"):
+                    sections.append(f"**דובר/ת:** {q['speaker_name']}")
+                sections.append(f"**סיבת בחירה:** {q.get('selection_reason', '')}")
+                sections.append(f"**משמעות:** {q.get('meaning_2_3_words', '')}")
+                if q.get("teacher_link_evidence"):
+                    sections.append(f"**קשר למרצה:** {q['teacher_link_evidence']}")
+
+    elif route_id == "lesson_student_stories":
+        sections.append("# אינדקס סיפורי תלמידים")
+
+        source = data.get("source", {})
+        if source:
+            if source.get("course_cycle_as_said"):
+                sections.append(f"**מחזור:** {source['course_cycle_as_said']}")
+            if source.get("lesson_number_as_said"):
+                sections.append(f"**שיעור:** {source['lesson_number_as_said']}")
+
+        if data.get("error"):
+            sections.append(f"\n**שגיאה:** {data.get('error_reason', 'לא ידוע')}")
+        else:
+            stories = data.get("stories", [])
+            if stories:
+                sections.append(f"\nנמצאו {data.get('stories_count', len(stories))} סיפורים/רגעים:")
+                for i, s in enumerate(stories, 1):
+                    sections.append(f"\n### {i}. {s.get('type', 'רגע')}")
+                    sections.append(f"**תיאור:** {s.get('short_description_one_sentence', '')}")
+
+                    if s.get("quote_key"):
+                        sections.append(f'> "{s["quote_key"]}"')
+
+                    who = s.get("who_said_it", "")
+                    name = s.get("speaker_name")
+                    if name:
+                        sections.append(f"**דובר/ת:** {name} ({who})")
+                    elif who:
+                        sections.append(f"**דובר/ת:** {who}")
+
+                    ts_start = s.get("timestamp_start", "")
+                    ts_end = s.get("timestamp_end")
+                    if ts_start:
+                        ts_text = f"{ts_start} — {ts_end}" if ts_end else ts_start
+                        sections.append(f"**זמן:** {ts_text}")
+
+                    tags = s.get("topics_tags", [])
+                    if tags:
+                        sections.append(f"**תגים:** {', '.join(tags)}")
+
+                    if s.get("source_excerpt"):
+                        sections.append(f"\n*קטע מקור:* {s['source_excerpt']}")
+
+                    if s.get("notes"):
+                        sections.append(f"*הערה:* {s['notes']}")
+            else:
+                sections.append("\nלא נמצאו סיפורים משמעותיים בתמלול זה.")
+
+    else:
+        # fallback — מציג JSON כטקסט מובנה
+        sections.append(f"# פלט — {route_id}")
+        _add_json_fields_recursively(data, sections)
+
+    return "\n".join(sections)
+
+
+def _add_json_fields_recursively(data, sections, indent=0, skip_keys=None):
+    """עזר — ממיר JSON שרירותי לרשימת שורות קריאות."""
+    skip = skip_keys or []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in skip or key == "file_name":
+                continue
+            if isinstance(value, (dict, list)):
+                sections.append(f"\n{'#' * min(indent + 2, 4)} {key}")
+                _add_json_fields_recursively(value, sections, indent + 1)
+            elif value is not None:
+                sections.append(f"**{key}:** {value}")
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                _add_json_fields_recursively(item, sections, indent)
+                sections.append("")  # שורה ריקה בין פריטים
+            elif item is not None:
+                sections.append(f"- {item}")
+
+
+# ─── שלב 5: שמירה ב-Notion ───────────────────────────────────────
+
+def save_to_notion(recording: dict, routing_result: dict, outputs: dict,
+                   transcript_text: str, language: str,
+                   config: dict, logger: logging.Logger) -> bool:
+    """שומר שורה אחת בדאטהבייס Notion עם כל הפלטים בעמודות נפרדות.
+
+    outputs: dict מ-route_id ל-output dict (כל אחד עם output_text, is_error, error_reason)
+    routing_result: dict עם routes, display_name, routing_notes
+    """
+
+    notion_key = os.environ.get(config.get("notion_api_key_env_var", "NOTION_API_KEY"))
+    if not notion_key:
+        logger.error("מפתח Notion API חסר! הגדר משתנה סביבה NOTION_API_KEY")
+        return False
+
+    database_id = config["notion_database_id"]
+    routes = routing_result["routes"]
+    display_name = routing_result.get("display_name", recording["folder_name"])
+
+    # קביעת סטטוס — שגיאה אם כל הפלטים נכשלו
+    any_error = any(outputs[r["route_id"]]["is_error"] for r in routes if r["route_id"] in outputs)
+    any_low_conf = any(r["low_confidence"] for r in routes)
+    all_error = all(outputs[r["route_id"]]["is_error"] for r in routes if r["route_id"] in outputs)
+
+    if all_error:
+        status = "שגיאה"
+    elif any_low_conf:
+        status = "לבדיקה ידנית"
+    else:
+        status = "הצלחה"
+
+    # רשימת מסלולים שרצו
+    route_ids = [r["route_id"] for r in routes]
+
+    # קטגוריה ראשית — לפי המסלול עם הביטחון הגבוה ביותר
+    primary_route = max(routes, key=lambda r: r["confidence"])
+    primary_category = ROUTE_TO_CATEGORY.get(primary_route["route_id"], "כללי")
+
+    # הכנת routing_notes
+    routing_notes_text = routing_result.get("routing_notes", "")
+    if isinstance(routing_notes_text, dict):
+        routing_notes_text = str(routing_notes_text)
+
+    # בניית properties
+    properties = {
+        "שם הקלטה": {"title": [{"text": {"content": display_name[:100]}}]},
+        "מסלולים": {"multi_select": [{"name": rid} for rid in route_ids]},
+        "קטגוריה": {"select": {"name": primary_category}},
+        "סטטוס": {"select": {"name": status}},
+        "נתיב קובץ": {"rich_text": [{"text": {"content": recording["audio_path"][:2000]}}]},
+    }
+
+    # תאריך הקלטה
+    if recording.get("date"):
+        properties["תאריך הקלטה"] = {"date": {"start": recording["date"]}}
+
+    # הערות ניתוב — עמודה נמחקה מ-Notion, הנתון נשמר בלוג בלבד
+    if routing_notes_text:
+        logger.info(f"הערות ניתוב: {routing_notes_text[:500]}")
+
+    # איסוף שגיאות
+    error_reasons = []
+    for route_info in routes:
+        rid = route_info["route_id"]
+        if rid in outputs and outputs[rid].get("error_reason"):
+            error_reasons.append(f"{rid}: {outputs[rid]['error_reason']}")
+
+    if error_reasons:
+        properties["סיבת שגיאה"] = {"rich_text": [{"text": {"content": "; ".join(error_reasons)[:2000]}}]}
+
+    # בניית תוכן הדף — כל פלט מפורמט בגוף הדף
+    content_blocks = []
+    for route_info in routes:
+        rid = route_info["route_id"]
+        if rid not in outputs or outputs[rid]["is_error"]:
+            continue
+        output_text = outputs[rid]["output_text"]
+
+        # המרת הפלט למרקדאון מפורמט ואז לבלוקי Notion
+        formatted_markdown = format_output_for_notion(output_text, rid)
+        formatted_blocks = _text_to_notion_blocks(formatted_markdown)
+        content_blocks.extend(formatted_blocks)
+
+        # קו הפרדה בין מסלולים
+        content_blocks.append({
+            "object": "block",
+            "type": "divider",
+            "divider": {},
+        })
+
+    # תמלול מלא ב-toggle עם פסקאות רגילות
+    transcript_blocks = []
+    if transcript_text:
+        transcript_blocks.append({
+            "object": "block",
+            "type": "divider",
+            "divider": {},
+        })
+        transcript_chunks = [transcript_text[i:i+2000] for i in range(0, len(transcript_text), 2000)]
+        toggle_children = []
+        for chunk in transcript_chunks:
+            toggle_children.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{"type": "text", "text": {"content": chunk}}],
+                },
+            })
+        transcript_blocks.append({
+            "object": "block",
+            "type": "toggle",
+            "toggle": {
+                "rich_text": [{"type": "text", "text": {"content": "תמלול מלא"}}],
+                "children": toggle_children[:100],
+            },
+        })
+
+    # חיבור כל הבלוקים — תוכן + תמלול
+    all_blocks = content_blocks + transcript_blocks
+
+    # Notion מגביל ל-100 בלוקים בקריאה אחת.
+    # אם יש יותר: יוצרים את הדף עם 100 הראשונים, ואז מוסיפים את השאר במנות.
+    first_batch = all_blocks[:100]
+    remaining_batches = [all_blocks[i:i+100] for i in range(100, len(all_blocks), 100)]
+
+    # שליחה ל-Notion API
+    headers = {
+        "Authorization": f"Bearer {notion_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+
+    payload = {
+        "parent": {"database_id": database_id},
+        "properties": properties,
+        "children": first_batch,
+    }
+
+    def do_create():
+        resp = requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload, timeout=30)
+        if resp.status_code != 200:
+            logger.error(f"Notion response ({resp.status_code}): {resp.text[:1000]}")
+        resp.raise_for_status()
+        return resp.json()
+
+    try:
+        result = api_call_with_retry(do_create, logger=logger)
+        page_id = result.get("id", "")
+        page_url = result.get("url", "")
+        logger.info(f"נשמר ב-Notion: {page_url}")
+
+        # הוספת בלוקים נוספים אם יש
+        for batch_num, batch in enumerate(remaining_batches, 1):
+            logger.info(f"מוסיף בלוקים נוספים (מנה {batch_num}, {len(batch)} בלוקים)...")
+            append_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+
+            def do_append(b=batch):
+                resp = requests.patch(append_url, headers=headers,
+                                      json={"children": b}, timeout=30)
+                if resp.status_code != 200:
+                    logger.error(f"Notion append ({resp.status_code}): {resp.text[:500]}")
+                resp.raise_for_status()
+                return resp.json()
+
+            api_call_with_retry(do_append, logger=logger)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"שגיאת Notion: {e}")
+        return False
+
+
+def _text_to_notion_blocks(markdown_text: str) -> list:
+    """ממיר מרקדאון פשוט לבלוקים של Notion API.
+
+    תומך ב: כותרות (#), מספרים (1. / 1) / 1.1), תבליטים (-/•),
+    ציטוטים (>), הזחות, טקסט רגיל.
+    """
+    blocks = []
+    lines = markdown_text.split("\n")
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # כותרת 1
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_1",
+                "heading_1": {"rich_text": [{"type": "text", "text": {"content": stripped[2:].strip()[:2000]}}]},
+            })
+        # כותרת 2
+        elif stripped.startswith("## "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {"rich_text": [{"type": "text", "text": {"content": stripped[3:].strip()[:2000]}}]},
+            })
+        # כותרת 3
+        elif stripped.startswith("### "):
+            blocks.append({
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {"rich_text": [{"type": "text", "text": {"content": stripped[4:].strip()[:2000]}}]},
+            })
+        # ציטוט
+        elif stripped.startswith("> "):
+            blocks.append({
+                "object": "block",
+                "type": "quote",
+                "quote": {"rich_text": [{"type": "text", "text": {"content": stripped[2:].strip()[:2000]}}]},
+            })
+        # תבליט (כולל מוזח)
+        elif stripped.startswith("- ") or stripped.startswith("• "):
+            prefix_len = 2
+            blocks.append({
+                "object": "block",
+                "type": "bulleted_list_item",
+                "bulleted_list_item": {"rich_text": _parse_inline_formatting(stripped[prefix_len:].strip()[:2000])},
+            })
+        # כותרת ממוספרת ראשית — 1) או 2) וכד'
+        elif re.match(r'^\d+\)\s', stripped):
+            text = re.sub(r'^\d+\)\s*', '', stripped)
+            blocks.append({
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {"rich_text": _parse_inline_formatting(text[:2000])},
+            })
+        # כותרת ממוספרת משנית — 1.1 או 2.3 וכד'
+        elif re.match(r'^\d+\.\d+\s', stripped):
+            text = re.sub(r'^\d+\.\d+\s*', '', stripped)
+            blocks.append({
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {"rich_text": _parse_inline_formatting(text[:2000])},
+            })
+        # פריט ממוספר — 1. טקסט
+        elif re.match(r'^\d+\.\s', stripped):
+            text = re.sub(r'^\d+\.\s*', '', stripped)
+            blocks.append({
+                "object": "block",
+                "type": "numbered_list_item",
+                "numbered_list_item": {"rich_text": _parse_inline_formatting(text[:2000])},
+            })
+        # טקסט רגיל (כולל הדגשות)
+        else:
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {"rich_text": _parse_inline_formatting(stripped[:2000])},
+            })
+
+    return blocks
+
+
+def _parse_inline_formatting(text: str) -> list:
+    """מפענח הדגשות **bold** בטקסט ומחזיר rich_text של Notion."""
+    parts = []
+    pattern = r'\*\*(.+?)\*\*'
+    last_end = 0
+
+    for match in re.finditer(pattern, text):
+        # טקסט רגיל לפני ההדגשה
+        if match.start() > last_end:
+            plain = text[last_end:match.start()]
+            if plain:
+                parts.append({"type": "text", "text": {"content": plain}})
+        # טקסט מודגש
+        parts.append({
+            "type": "text",
+            "text": {"content": match.group(1)},
+            "annotations": {"bold": True},
+        })
+        last_end = match.end()
+
+    # טקסט שנשאר אחרי ההדגשה האחרונה
+    if last_end < len(text):
+        remaining = text[last_end:]
+        if remaining:
+            parts.append({"type": "text", "text": {"content": remaining}})
+
+    # אם אין הדגשות, מחזיר את הטקסט כמו שהוא
+    if not parts:
+        parts.append({"type": "text", "text": {"content": text}})
+
+    return parts
+
+
+# ─── הרצה ראשית ───────────────────────────────────────────────────
+
+def main():
+    """הרצה ראשית של הפייפליין."""
+
+    # טעינת הגדרות
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+
+    if not os.path.exists(config_path):
+        print(f"קובץ הגדרות לא נמצא: {config_path}")
+        sys.exit(1)
+
+    config = load_config(config_path)
+
+    # הגדרת נתיבים יחסיים ל-config
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    prompts_dir = os.path.join(script_dir, config.get("prompts_dir", "prompts"))
+    processed_path = os.path.join(script_dir, config.get("processed_files_path", "processed_files.json"))
+    log_file = os.path.join(script_dir, config.get("log_file", "pipeline.log"))
+
+    # אתחול
+    logger = setup_logging(log_file)
+    logger.info("=" * 60)
+    logger.info("מתחיל הרצה של zoom_pipeline")
+    logger.info("=" * 60)
+
+    # בדיקת מפתחות API
+    openai_key = os.environ.get(config.get("openai_api_key_env_var", "OPENAI_API_KEY"))
+    if not openai_key:
+        logger.error("מפתח OpenAI API חסר! הגדירי משתנה סביבה OPENAI_API_KEY")
+        sys.exit(1)
+
+    notion_key = os.environ.get(config.get("notion_api_key_env_var", "NOTION_API_KEY"))
+    if not notion_key:
+        logger.error("מפתח Notion API חסר! הגדירי משתנה סביבה NOTION_API_KEY")
+        sys.exit(1)
+
+    # אתחול OpenAI client
+    client = OpenAI(api_key=openai_key)
+    model = config.get("openai_model_for_prompts", "gpt-4o")
+
+    # טעינת רשימת קבצים מעובדים
+    processed = load_processed_files(processed_path)
+
+    # שלב 0: סריקה
+    zoom_path = os.path.expanduser(config["zoom_recordings_path"])
+    recordings = scan_zoom_folder(zoom_path, processed, logger)
+
+    if not recordings:
+        logger.info("אין הקלטות חדשות. מסיים.")
+        return
+
+    # עיבוד כל הקלטה
+    success_count = 0
+    error_count = 0
+
+    for i, recording in enumerate(recordings, 1):
+        logger.info(f"\n--- הקלטה {i}/{len(recordings)}: {recording['folder_name']} ---")
+
+        try:
+            # שלב 1: תמלול
+            transcription = transcribe_audio(recording["audio_path"], client, config, logger)
+            if not transcription:
+                logger.warning(f"דילוג — תמלול נכשל: {recording['folder_name']}")
+                processed[recording["audio_path"]] = {
+                    "status": "transcription_failed",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                save_processed_files(processed_path, processed)
+                error_count += 1
+                continue
+
+            transcript_text = transcription["transcript"]
+            language = detect_language(transcript_text)
+
+            # שלב 2: ניתוב (מחזיר רשימת מסלולים)
+            routing_result = route_transcript(
+                transcript_text, recording["folder_name"],
+                prompts_dir, client, model, logger,
+                config=config
+            )
+            if not routing_result:
+                logger.warning(f"דילוג — ניתוב נכשל: {recording['folder_name']}")
+                processed[recording["audio_path"]] = {
+                    "status": "routing_failed",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                save_processed_files(processed_path, processed)
+                error_count += 1
+                continue
+
+            display_name = routing_result["display_name"]
+            routes = routing_result["routes"]
+            recording["display_name"] = display_name
+
+            # שלב 3: הרצת כל פרומפט — איסוף פלטים ל-dict
+            words = transcription.get("words", [])
+            outputs = {}
+            for route_info in routes:
+                route_id = route_info["route_id"]
+                logger.info(f"  מעבד מסלול: {route_id}")
+
+                output = run_target_prompt(
+                    transcript_text, recording["folder_name"],
+                    route_id, prompts_dir, client, model, logger,
+                    words=words, config=config
+                )
+                outputs[route_id] = output
+
+            # שלב 4+5: שמירה אחת ב-Notion עם כל הפלטים
+            saved = save_to_notion(
+                recording, routing_result, outputs,
+                transcript_text, language, config, logger
+            )
+
+            route_ids_done = [r["route_id"] for r in routes]
+
+            # עדכון קבצים מעובדים
+            processed[recording["audio_path"]] = {
+                "status": "success" if saved else "error",
+                "route_ids": route_ids_done,
+                "timestamp": datetime.now().isoformat(),
+            }
+            save_processed_files(processed_path, processed)
+
+            if saved:
+                success_count += 1
+            else:
+                error_count += 1
+
+        except Exception as e:
+            logger.error(f"שגיאה כללית בעיבוד {recording['folder_name']}: {e}")
+            processed[recording["audio_path"]] = {
+                "status": "general_error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat(),
+            }
+            save_processed_files(processed_path, processed)
+            error_count += 1
+
+    # סיכום
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f"סיום הרצה: {success_count} הצלחות, {error_count} שגיאות מתוך {len(recordings)} הקלטות")
+    logger.info(f"{'=' * 60}")
+
+
+if __name__ == "__main__":
+    main()

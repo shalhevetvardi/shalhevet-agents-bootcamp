@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>טירונות סוכנים — התקבלת</title>
+</head>
+<body style="margin: 0; padding: 40px 20px; background: #F5F5F4; font-family: Arial, 'Helvetica Neue', sans-serif;">
+
+<div style="max-width: 560px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.06);">
+
+  <!-- Header: כותרת + לוגו -->
+  <div style="background: linear-gradient(135deg, #9AB855, #7D9B3C); padding: 28px 28px 24px 28px; text-align: center;">
+    {logo_img}
+    <p style="margin: 0; font-size: 22px; font-weight: bold; color: white;">התקבלת לתוכנית טירונות סוכנים</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding: 28px 28px 32px 28px; font-size: 15px; line-height: 1.9; color: #1C1917;">
+
+    <!-- ברכת פתיחה + משפט אישי מהשיחה -->
+    <p style="margin: 0 0 4px 0; font-size: 17px;">היי {first_name} 👋</p>
+    <p style="margin: 0 0 24px 0; color: #57534E;">{personal_opening}</p>
+
+    <!-- פסקת מבוא קבועה -->
+    <p style="margin: 0 0 24px 0;">מצורף המסמך המלא של הטירונות — מה עוברים בכל מפגש, מה מקבלים מעבר למפגשים, ואיך יוצאים עם סוכן ארוז שעובד.</p>
+
+    <!-- בלוק גרסאות הפסקה האישית (הכל בתוך הריבוע עם הפס הירוק) -->
+    <div style="background: #FAFAF9; border-right: 4px solid #7D9B3C; border-radius: 10px; padding: 20px 22px; margin: 0 0 28px 0;">
+      <p style="margin: 0 0 6px 0; font-size: 11px; color: #A8A29E; font-weight: bold; letter-spacing: 0.5px;">— גרסה א׳: עם ציטוט —</p>
+      {personal_paragraph_with_quote}
+      <div style="margin: 20px 0; padding: 10px 14px; background: #FEF3C7; border: 1px dashed #D97706; border-radius: 6px; font-size: 12px; color: #92400E; text-align: center; font-weight: bold;">בחרי גרסה אחת ומחקי את השנייה לפני שליחה</div>
+      <p style="margin: 0 0 6px 0; font-size: 11px; color: #A8A29E; font-weight: bold; letter-spacing: 0.5px;">— גרסה ב׳: בלי ציטוט —</p>
+      {personal_paragraph_without_quote}
+    </div>
+
+    <!-- בלוק ערך: מוזרק לפי המגדר (2 גרסאות) -->
+    <div style="background: #F0FDF4; border-right: 4px solid #22C55E; border-radius: 10px; padding: 18px 20px; margin: 0 0 24px 0;">
+      {value_block_gendered}
+    </div>
+
+    <!-- קופסה אדומה: קוד הנחה. קבועה. תמיד מופיעה. -->
+    <div style="background: linear-gradient(135deg, #EF4444, #DC2626); border-radius: 12px; padding: 22px 24px; margin: 0 0 28px 0; color: white;">
+      <p style="margin: 0 0 12px 0; font-size: 16px; font-weight: bold;">🎁 ויש לי קוד הנחה לתת לך — בתמורה לעדות מצולמת</p>
+      <p style="margin: 0 0 14px 0; font-size: 14px; opacity: 0.9;">אני צריכה 5 עדויות סה״כ, מה שאומר שיש 5 קודים בלבד.<br>ניסית והקוד עובד? הרווחת!<br>הקוד לא עבד? זה אומר שנגמרו ההטבות. סליחה מראש ותודה על ההבנה.</p>
+      <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; text-align: center;">
+        <p style="margin: 0 0 4px 0; font-size: 12px; opacity: 0.8; letter-spacing: 1px;">קוד הנחה</p>
+        <p style="margin: 0; font-size: 24px; font-weight: bold; letter-spacing: 3px;">agents1</p>
+      </div>
+    </div>
+
+    <!-- קופסת ״הקורס בקצרה״: קבועה -->
+    <div style="background: #DCFCE7; border-radius: 12px; padding: 20px 22px; margin: 0 0 12px 0; text-align: center;">
+      <p style="margin: 0 0 6px 0; font-size: 13px; color: #365314; letter-spacing: 0.5px;">הקורס בקצרה</p>
+      <p style="margin: 0; font-size: 15px; color: #1A2E05; font-weight: bold;">שליטה מלאה באקוסיסטם של Claude, שיטת בנייה אמיתית, וסוכן שעובד ביד בסוף.</p>
+    </div>
+
+    <!-- CTA: קבוע -->
+    <div style="text-align: center; margin: 0 0 28px 0;">
+      <a href="https://aimprove.co.il/product/agents-course/" style="background: #5A7025; color: white; text-decoration: none; padding: 14px 40px; border-radius: 50px; font-size: 16px; font-weight: bold; display: inline-block;">לשריון מקום</a>
+    </div>
+
+    <!-- משפט סיום + חתימה: קבועים (ניטרלי מגדרית) -->
+    <p style="margin: 0 0 24px 0; color: #44403C;">המקומות מוגבלים והקבוצה כבר מתמלאת, מחכה לראות אותך בפנים. זו הולכת להיות קבוצה מטורפת.</p>
+
+    <!-- שורת הבטחה מותנית — בסוף המייל, לפני החתימה -->
+    {promise_line}
+
+    <p style="margin: 0;">שלהבת 💛</p>
+
+    <!-- PS: שורה אחת עם פועל מגדרי (תבני/תבנה) -->
+    <div style="background: #F0FDF4; border: 1px dashed #6B8E23; border-radius: 10px; padding: 14px 18px; margin-top: 24px;">
+      <p style="margin: 0; font-size: 14px; color: #4A5D23;">נ.ב. המייל הזה נכתב על ידי סוכן AI. בטירונות — {ps_verb_gendered} אחד כזה בדיוק 🤖</p>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
