@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+.env.local
+*.local
+
+# Per-client raw data — privacy-sensitive (real WhatsApp history)
+clients/*/history.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Node (if used later)
+node_modules/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
