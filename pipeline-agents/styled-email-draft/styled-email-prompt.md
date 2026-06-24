@@ -32,15 +32,19 @@
 
 ### שלב 3 — בנייה
 
+⚠️ קריטי לטיוטות: Gmail מוחק `background` מ-`<div>`. בטיוטות (draft), Gmail מסיר `background:` שמוגדר ב-CSS (כולל `linear-gradient`) מ-`<div>` - הבלוק מופיע לבן והמייל נראה שבור. הפתרון: כל בלוק צבעוני = `<table>` עם `bgcolor` על ה-`<td>` (תכונת HTML שגמייל שומר גם בטיוטה). צבע אחיד → `bgcolor`. gradient → `bgcolor` solid fallback + `style="background:linear-gradient(...)"` בנוסף.
+
 מבנה HTML בסיסי:
 
 ```html
 <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 15px; line-height: 1.8; color: #222;">
 
-  <!-- באנר עליון (אופציונלי — להדגשת מסר מרכזי) -->
-  <div style="background: linear-gradient(135deg, COLOR1, COLOR2); color: white; padding: 20px 24px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
-    <p style="font-size: 13px; margin: 0;">MAIN_MESSAGE</p>
-  </div>
+  <!-- באנר עליון (אופציונלי). table+bgcolor - אחרת נעלם בטיוטה -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px"><tr>
+    <td bgcolor="COLOR1" style="background: linear-gradient(135deg, COLOR1, COLOR2); color: white; padding: 20px 24px; border-radius: 12px; text-align: center;">
+      <p style="font-size: 13px; margin: 0;">MAIN_MESSAGE</p>
+    </td>
+  </tr></table>
 
   <!-- תוכן -->
 
@@ -50,10 +54,12 @@
   <!-- כותרת משנית -->
   <h3 style="color: PRIMARY_COLOR;">EMOJI TITLE</h3>
 
-  <!-- בלוק צבעוני (לפריטים ברשימה) -->
-  <div style="padding: 10px 14px; background: LIGHT_BG; border-radius: 8px; margin-bottom: 6px;">
-    EMOJI <strong>LABEL</strong> — DESCRIPTION
-  </div>
+  <!-- בלוק צבעוני (לפריטים ברשימה). table+bgcolor -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:6px"><tr>
+    <td bgcolor="LIGHT_BG" style="background: LIGHT_BG; padding: 10px 14px; border-radius: 8px;">
+      EMOJI <strong>LABEL</strong> - DESCRIPTION
+    </td>
+  </tr></table>
 
 </div>
 ```
