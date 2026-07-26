@@ -1,0 +1,10 @@
+{
+  "name": "work-foreman",
+  "description": "מנהל עבודה — סקיל תזמור: המודל החזק מתכנן, מנתב ומאמת, בזמן שמודלים זולים מבצעים. האצלה עם כרטיסי עבודה, אימות עיוור, ומשמעת תקציב. Team-lead orchestration skill in Hebrew: the strongest model plans, routes and verifies while cheaper Claude workers execute.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Shalhevet Vardi — Aimprove"
+  },
+  "license": "MIT",
+  "keywords": ["orchestration", "delegation", "subagents", "cost-optimization", "verification", "hebrew"]
+}

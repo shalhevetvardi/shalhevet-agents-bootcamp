@@ -1,0 +1,13 @@
+{
+  "name": "work-foreman",
+  "owner": {
+    "name": "Aimprove"
+  },
+  "plugins": [
+    {
+      "name": "work-foreman",
+      "source": "./",
+      "description": "מנהל עבודה — סקיל תזמור שמאציל למודלים זולים ומאמת בעיוורון"
+    }
+  ]
+}
