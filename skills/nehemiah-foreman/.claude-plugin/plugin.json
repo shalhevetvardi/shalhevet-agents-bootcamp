@@ -1,0 +1,10 @@
+{
+  "name": "nehemiah-foreman",
+  "description": "נחמיה — מנהל עבודה: המודל החזק מתכנן, מנתב ומאמת, בזמן שמודלים זולים מבצעים. האצלה עם כרטיסי עבודה, אימות עיוור, ומשמעת תקציב. Team-lead orchestrator in Hebrew: the strongest model plans, routes and verifies while cheaper Claude workers execute.",
+  "version": "0.2.1",
+  "author": {
+    "name": "Shalhevet Vardi — Aimprove"
+  },
+  "license": "MIT",
+  "keywords": ["orchestration", "delegation", "subagents", "cost-optimization", "verification", "hebrew"]
+}

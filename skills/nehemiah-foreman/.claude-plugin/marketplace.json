@@ -1,0 +1,13 @@
+{
+  "name": "nehemiah-foreman",
+  "owner": {
+    "name": "Aimprove"
+  },
+  "plugins": [
+    {
+      "name": "nehemiah-foreman",
+      "source": "./",
+      "description": "נחמיה — מנהל עבודה שמאציל למודלים זולים ומאמת בעיוורון"
+    }
+  ]
+}
