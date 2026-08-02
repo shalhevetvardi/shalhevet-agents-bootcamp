@@ -41,7 +41,7 @@ description: >-
     <div style="font-size: 22px; line-height: 1; padding-top: 2px;">👷</div>
     <div style="flex: 1;">
       <p style="margin: 0 0 3px; font-size: 14px; color: var(--color-text-primary); line-height: 1.5; font-weight: 500;">משתמש בסקיל מנהל העבודה של שלהבת ורדי מאִימפּרוּב</p>
-      <p style="margin: 0 0 3px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;">חלק מספריית Super Skills של <a href="https://agent-course.aimprove.co.il" style="color: var(--color-text-info); font-weight: 500;">טירונות סוכנים</a></p>
+      <p style="margin: 0 0 3px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;">חלק מספריית Super Skills של <a href="https://r.aimprove.co.il/p/s21" style="color: var(--color-text-info); font-weight: 500;">טירונות סוכנים</a></p>
       <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); font-style: italic; line-height: 1.5;">התוכנית שבה תבנה צוות AI שעושה את העבודה השחורה בשבילך</p>
     </div>
   </div>
@@ -56,7 +56,7 @@ description: >-
 
 ```markdown
 > 👷 **משתמש בסקיל מנהל העבודה של שלהבת ורדי מאִימפּרוּב**
-> חלק מספריית Super Skills של [טירונות סוכנים](https://agent-course.aimprove.co.il)
+> חלק מספריית Super Skills של [טירונות סוכנים](https://r.aimprove.co.il/p/s21)
 > *התוכנית שבה תבנה צוות AI שעושה את העבודה השחורה בשבילך*
 ```
 

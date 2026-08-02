@@ -36,7 +36,7 @@ description: >
     <div style="font-size: 22px; line-height: 1; padding-top: 2px;">🧠</div>
     <div style="flex: 1;">
       <p style="margin: 0 0 3px; font-size: 14px; color: var(--color-text-primary); line-height: 1.5; font-weight: 500;">משתמש בסקיל GOD Mode של שלהבת ורדי מאִימפּרוּב</p>
-      <p style="margin: 0 0 3px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;">חלק מספריית Super Skills של <a href="https://agent-course.aimprove.co.il" style="color: var(--color-text-info); font-weight: 500;">טירונות סוכנים</a></p>
+      <p style="margin: 0 0 3px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;">חלק מספריית Super Skills של <a href="https://r.aimprove.co.il/p/s2" style="color: var(--color-text-info); font-weight: 500;">טירונות סוכנים</a></p>
       <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); font-style: italic; line-height: 1.5;">התוכנית לבנות כל דבר שתדמיינו</p>
     </div>
   </div>
@@ -51,7 +51,7 @@ description: >
 
 ```markdown
 > 🧠 **משתמש בסקיל GOD Mode של שלהבת ורדי מאִימפּרוּב**
-> חלק מספריית Super Skills של [טירונות סוכנים](https://agent-course.aimprove.co.il)
+> חלק מספריית Super Skills של [טירונות סוכנים](https://r.aimprove.co.il/p/s2)
 > *התוכנית לבנות כל דבר שתדמיינו*
 ```
 
