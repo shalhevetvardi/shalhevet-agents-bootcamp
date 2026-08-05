@@ -1,7 +1,7 @@
 {
   "name": "rebuild-plugin",
-  "description": "אריזת סוכן מחדש לקובץ פלאגין (.plugin) והכנתו להתקנה מחדש: מתקנים את תיקיית המקור, עושים rebuild, והפלאגין נכנס ל-plugins-to-install/. לתלמידי טירונות סוכנים. Repackage an agent folder into an installable .plugin file and drop it in plugins-to-install/.",
-  "version": "0.1.0",
+  "description": "אריזת סוכן מחדש לקובץ פלאגין (.plugin) והתקנתו מחדש דרך קלוד, עם בדיקות בטיחות (מבנה skills, BOM) ואריזה תקינה בכל מערכת הפעלה. לתלמידי טירונות סוכנים. Repackage an agent into an installable .plugin (manual reinstall via Claude), with safety checks and cross-OS-safe archiving.",
+  "version": "0.3.0",
   "author": {
     "name": "Shalhevet Vardi — Aimprove"
   },
