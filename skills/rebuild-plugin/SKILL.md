@@ -53,7 +53,7 @@ description: >-
    - **Mac / Linux:**
      ```bash
      cd <שורש-הפלאגין>
-     zip -r <שורש-הריפו>/plugins-to-install/<שם-הסוכן>.plugin . -x "*.DS_Store" -x "*/.git/*"
+     zip -r <שורש-הריפו>/plugins-to-install/<שם-הסוכן>.plugin . -x "*.DS_Store" -x "*/.git/*" -x "*.plugin" -x "*.zip"
      ```
    - **Windows (PowerShell) - אסור `Compress-Archive`:** ב-Windows PowerShell 5.1, `Compress-Archive` כותב path separators עם backslash בתוך ה-zip (לא forward slash) - זה שובר קוראי zip חוצי-פלטפורמה (כולל מתקין הפלאגינים), וגורם ל-"plugin.json is not valid JSON" גם כשה-JSON תקין, כי הוא לא נמצא בנתיב הצפוי. חובה לבנות את ה-zip ישירות דרך `System.IO.Compression.ZipArchive` עם שמות entry בעלי forward slash:
      ```powershell
@@ -63,7 +63,7 @@ description: >-
      $dest = "<שורש-הריפו>\plugins-to-install\<שם-הסוכן>.plugin"
      if (Test-Path $dest) { Remove-Item $dest -Force }
      $zip = [System.IO.Compression.ZipFile]::Open($dest, [System.IO.Compression.ZipArchiveMode]::Create)
-     Get-ChildItem -Path $src -Recurse -File | ForEach-Object {
+     Get-ChildItem -Path $src -Recurse -File | Where-Object { $_.Extension -notin '.plugin', '.zip' } | ForEach-Object {
          $entryName = ($_.FullName.Substring($src.Length).TrimStart('\','/')) -replace '\\','/'
          $entry = $zip.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
          $s = $entry.Open(); $fs = [System.IO.File]::OpenRead($_.FullName)
@@ -71,7 +71,7 @@ description: >-
      }
      $zip.Dispose()
      ```
-   - העיקר: קובץ אחד בשם `<שם-הסוכן>.plugin` שמכיל את תוכן שורש הפלאגין, כולל `.claude-plugin/`, עם forward slash בכל נתיבי ה-entries. אם `zip` לא זמין ב-Mac/Linux - השתמש בכלי הארכוב של המערכת, אבל ודא forward slash.
+   - העיקר: קובץ אחד בשם `<שם-הסוכן>.plugin` שמכיל את תוכן שורש הפלאגין, כולל `.claude-plugin/`, עם forward slash בכל נתיבי ה-entries. **מחריגים קבצי `.plugin` ו-`.zip` ישנים ששוכבים בתיקיית הסוכן (ארכיוני build) - כדי לא לארוז עותק ישן של הפלאגין לתוך החבילה החדשה.** אם `zip` לא זמין ב-Mac/Linux - השתמש בכלי הארכוב של המערכת, אבל ודא forward slash.
 
 6. **מתקין ורושם את הגרסה החדשה** (החלק שמייתר מחיקה ידנית). תיקיית הפלאגינים המותקנים:
    `~/.claude/plugins/marketplaces/local-desktop-app-uploads/<שם-הסוכן>`
