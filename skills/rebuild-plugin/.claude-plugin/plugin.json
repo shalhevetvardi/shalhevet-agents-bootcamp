@@ -1,7 +1,7 @@
 {
   "name": "rebuild-plugin",
-  "description": "אריזת סוכן מחדש לקובץ פלאגין (.plugin), התקנה אוטומטית והחלפת הגרסה הישנה - עם 4 בדיקות מבנה (שורש הפלאגין, מיקום SKILL.md, BOM, סכמת plugin.json), רישום מלא של הפלאגין (installed_plugins + marketplace + enabledPlugins), אריזה תקינה בכל מערכת הפעלה, וגיבוי+אימות+שחזור בהתקנה. לתלמידי טירונות סוכנים. Repackage an agent into a .plugin and auto-install/replace the old version, with 4 structure checks, full plugin registration (installed_plugins + marketplace + enabledPlugins), cross-OS-safe archiving, and backup/verify/restore on install.",
-  "version": "0.4.2",
+  "description": "אריזת סקיל קיים לקובץ .plugin עם התקנה אוטומטית שמחליפה גרסה ישנה: 4 בדיקות מבנה, רישום מלא בכל מקומות ההתקנה, גיבוי+אימות+שחזור בטוחים בכל מערכת הפעלה. לתלמידי טירונות סוכנים. Repackages a skill into an installable .plugin with auto-install, structure checks, full registration, and safe backup/restore.",
+  "version": "0.4.3",
   "author": {
     "name": "Shalhevet Vardi — Aimprove"
   },
