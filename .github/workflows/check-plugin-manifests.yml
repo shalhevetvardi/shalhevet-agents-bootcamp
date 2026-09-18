@@ -1,0 +1,21 @@
+name: Check plugin manifests
+
+on:
+  push:
+    paths:
+      - "**/.claude-plugin/plugin.json"
+      - "scripts/check_plugin_descriptions.py"
+  pull_request:
+    paths:
+      - "**/.claude-plugin/plugin.json"
+      - "scripts/check_plugin_descriptions.py"
+
+jobs:
+  check-descriptions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove the guard itself catches a too-long description
+        run: python3 scripts/check_plugin_descriptions.py --self-test
+      - name: Check every plugin.json in the repo
+        run: python3 scripts/check_plugin_descriptions.py
