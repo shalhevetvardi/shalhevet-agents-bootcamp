@@ -172,7 +172,7 @@ The color palette is deliberately broad and unapologetically saturated: yellow, 
 - Text: `#FFFFFF`
 - Border-radius: `15px`
 - Font: 48–60px weight 800 (the number), 16px weight 400 (the label)
-- Use: "3,784 אנשים" counter boxes
+- Use: counter boxes with real figures only, never an invented number. Aimprove overall: "עשרות אלפי תלמידים" (decision 14-10-2026)
 
 ### Navigation
 
