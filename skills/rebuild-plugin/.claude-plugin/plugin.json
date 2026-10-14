@@ -1,7 +1,7 @@
 {
   "name": "rebuild-plugin",
   "description": "אריזת סקיל קיים לקובץ .plugin עם התקנה אוטומטית שמחליפה גרסה ישנה: 4 בדיקות מבנה, רישום מלא בכל מקומות ההתקנה, גיבוי+אימות+שחזור בטוחים בכל מערכת הפעלה. לתלמידי טירונות סוכנים. Repackages a skill into an installable .plugin with auto-install, structure checks, full registration, and safe backup/restore.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "author": {
     "name": "Shalhevet Vardi — Aimprove"
   },
