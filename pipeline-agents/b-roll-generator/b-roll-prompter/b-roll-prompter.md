@@ -7,7 +7,7 @@ description: לקבל תמלול/תסריט של ריל ולהפיק חבילת 
 
 ## 🎯 המטרה
 
-לקחת תסריט/תמלול של ריל ולהפיק **חבילת פרומפטים מלאה** — שלהבת מריצה את הפרומפטים ידנית בכלים זולים. הסקיל **לא יוצר תמונות או וידאו** — הוא יוצר את ה**פרומפטים** ב-**אנגלית**, מוכנים להעתק-הדבק.
+לקחת תסריט/תמלול של ריל ולהפיק **חבילת פרומפטים מלאה** - המשתמש מריץ את הפרומפטים ידנית בכלים זולים. הסקיל **לא יוצר תמונות או וידאו** — הוא יוצר את ה**פרומפטים** ב-**אנגלית**, מוכנים להעתק-הדבק.
 
 ---
 
@@ -279,12 +279,12 @@ Sofia Coppola היא **השפה הצילומית הבסיסית** (35mm, פלט�
 
 ## 🪞 שכבת זהות אישית
 
-### 20. Personal panels — זיהוי רגעים אישיים של שלהבת
+### 20. Personal panels - זיהוי רגעים אישיים של המגיש/ה
 
 הריל מכיל **שני סוגים** של דמויות:
 
 - **הפרוטגוניסטית הגנרית** = פרוקסי לקהל. נשארת אנונימית. רוב הפאנלים.
-- **שלהבת עצמה** = מופיעה כשהתסריט הופך אישי (הכרזה, הבטחה, חוויה אישית, מנייפסט).
+- **המגיש/ה עצמו/ה** (מי שמדבר/ת בריל) = מופיע/ה כשהתסריט הופך אישי (הכרזה, הבטחה, חוויה אישית, מנייפסט).
 
 **טריגרים שמסמנים פאנל אישי:**
 - "**אני** הבטחתי / יצרתי / אגלה / אחשוף / בניתי / מאמינה ש..."
@@ -302,15 +302,15 @@ Sofia Coppola היא **השפה הצילומית הבסיסית** (35mm, פלט�
 ```
 
 **הוראות יצירה לפאנל אישי:**
-1. הפרומפט מתחיל ב-trigger word: `shalhevet`
-2. תיאור הסצנה כולל את שלהבת (לא הפרוטגוניסטית הגנרית)
-3. הסקיל מוסיף הערה למשתמשת: "**Use:** fal-ai LoRA inference with `shalhevet` trigger word (LoRA ID: `019dea0c-d60f-7e53-b214-c7fadb86332d`)"
+1. הפרומפט מתחיל ב-trigger word של ה-LoRA האישי של המגיש/ה (`<trigger-word>`)
+2. תיאור הסצנה כולל את המגיש/ה (לא את הפרוטגוניסטית הגנרית)
+3. הסקיל מוסיף הערה למשתמש: "**Use:** fal-ai LoRA inference with `<trigger-word>` trigger word (LoRA ID: `<your-lora-id>`)". ה-LoRA הוא מודל שהמשתמש אימן ב-fal על תמונות של עצמו; בלי LoRA כזה אין פאנלים אישיים
 4. הפאנל **לא** משתמש ב-character_reference של הפרוטגוניסטית — את הזהות יוצרת ה-LoRA
 
 **דוגמה לפרומפט פאנל אישי:**
 
 ```
-shalhevet, an Israeli woman in her thirties, sits at a clean modern lab desk
+<trigger-word>, a woman in her thirties, sits at a clean modern lab desk
 in Sofia Coppola intimate lighting, her face fully visible in three-quarter
 profile, looking thoughtfully at a tablet she's holding. Camera positioned
 1.5m to her left, at her eye level. Eight floating screens hover in a soft
@@ -322,11 +322,11 @@ as warm orange #DA7756 abstract suggestions...
 **הערה למשתמשת בפאנל אישי:**
 
 ```
-🪞 PERSONAL PANEL — Use Shalhevet's trained LoRA
+🪞 PERSONAL PANEL - Use your trained LoRA
 - Platform: fal.ai → Flux LoRA Inference
-- Trigger word: shalhevet
+- Trigger word: <trigger-word>
 - Base model: Flux Dev (verify in your training history)
-- LoRA ID: 019dea0c-d60f-7e53-b214-c7fadb86332d
+- LoRA ID: <your-lora-id>
 ```
 
 **אם הפאנל אישי, אל להעביר character_reference image** — הזהות מגיעה מה-LoRA.
@@ -375,7 +375,7 @@ as warm orange #DA7756 abstract suggestions...
 | Midjourney | שחור/לבן | אפור/לבן עכור | אקדמי |
 | Runway | שחור + ניאון אקסנט | אפור + פסטל | טכי-עכשווי |
 
-**אם המותג לא ברשימה:** לציין מפורשות במקרו "צבעי המותג לא ידועים — שלהבת תספק" ולא להמציא.
+**אם המותג לא ברשימה:** לציין מפורשות במקרו "צבעי המותג לא ידועים - המשתמש יספק" ולא להמציא.
 
 ---
 
@@ -423,11 +423,11 @@ as warm orange #DA7756 abstract suggestions...
 
 לכל פאנל:
 
-10. **בדוק אם זה פאנל אישי** — סרוק את שורת התסריט אחר טריגרים (אני / אצלי / שלי / הבטחתי / יצרתי). אם כן — סמן `🪞 PERSONAL PANEL`, השתמש ב-trigger word `shalhevet` בפרומפט, וכלול את הוראות ה-LoRA.
+10. **בדוק אם זה פאנל אישי** — סרוק את שורת התסריט אחר טריגרים (אני / אצלי / שלי / הבטחתי / יצרתי). אם כן — סמן `🪞 PERSONAL PANEL`, השתמש ב-trigger word של ה-LoRA האישי בפרומפט, וכלול את הוראות ה-LoRA.
 11. החלט אם המותג נוכח דיאגטית בקאדר (כן/לא + איך).
 12. החלט על references — האם להעביר character/location reference. ברירת מחדל: לא. בפאנל אישי **תמיד לא** (הזהות מ-LoRA).
 13. כתוב Scene description קצר בעברית.
-14. כתוב פרומפט תמונה באנגלית לפי 14 הסעיפים (Camera-First, ז'אנר ספציפי, אנטי-רפרנס לקלישאות). פאנל אישי מתחיל ב-`shalhevet, ...`
+14. כתוב פרומפט תמונה באנגלית לפי 14 הסעיפים (Camera-First, ז'אנר ספציפי, אנטי-רפרנס לקלישאות). פאנל אישי מתחיל ב-`<trigger-word>, ...`
 15. כתוב פרומפט וידאו באנגלית: סטטי או תזוזה? מה האירוע בשניה 4-6? מה הסאונד? תמיד `No music. No voiceover.`
 
 ## שלב 4: סיכום הפקה
@@ -489,7 +489,7 @@ as warm orange #DA7756 abstract suggestions...
 
 **🎨 IMAGE PROMPT (English, ready to paste):**
 
-[פרומפט מלא 250-400 מילים, Camera-First, ז'אנר ספציפי, אנטי-רפרנס לקלישאות, 9:16. בפאנל אישי — מתחיל ב-trigger word "shalhevet"]
+[פרומפט מלא 250-400 מילים, Camera-First, ז'אנר ספציפי, אנטי-רפרנס לקלישאות, 9:16. בפאנל אישי - מתחיל ב-trigger word של ה-LoRA]
 
 **🎥 VIDEO PROMPT (English, image-to-video, 8s, ready to paste):**
 
@@ -501,8 +501,8 @@ as warm orange #DA7756 abstract suggestions...
 
 **🛠️ Generation tools (לפאנל אישי בלבד):**
 - Platform: fal.ai → Flux LoRA Inference
-- Trigger word: `shalhevet`
-- LoRA ID: `019dea0c-d60f-7e53-b214-c7fadb86332d`
+- Trigger word: `<trigger-word>`
+- LoRA ID: `<your-lora-id>`
 - Base model: Flux Dev
 
 **Duration:** Xs
@@ -583,10 +583,10 @@ as warm orange #DA7756 abstract suggestions...
 
 ## פאנלים אישיים (אם יש)
 - [ ] הפאנל מסומן 🪞 PERSONAL PANEL
-- [ ] הפרומפט מתחיל ב-trigger word `shalhevet`
+- [ ] הפרומפט מתחיל ב-trigger word של ה-LoRA
 - [ ] הוראות ה-LoRA כלולות (Platform, Trigger, LoRA ID, Base model)
 - [ ] include_character_ref = לא (הזהות מ-LoRA, לא מרפרנס)
-- [ ] תיאור הדמות בפאנל מתאים לשלהבת (לא לפרוטגוניסטית הגנרית)
+- [ ] תיאור הדמות בפאנל מתאים למגיש/ה (לא לפרוטגוניסטית הגנרית)
 
 ---
 
