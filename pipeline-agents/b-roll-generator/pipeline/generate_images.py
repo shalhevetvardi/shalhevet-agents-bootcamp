@@ -6,7 +6,7 @@ generate_images.py
 
 מעבר מ-Nano Banana (Gemini) ל-Flux (fal.ai) כי:
 - תומך native ב-9:16 (לא תלוי בפרומפט)
-- תומך בלורה אישית (לפאנלים של שלהבת)
+- תומך בלורה אישית (לפאנלים של המגיש/ה)
 - אותה פלטפורמה כמו Kling — נוח לעבודה אחידה
 
 החשיבה היצירתית מגיעה מהסקיל b-roll-prompter (המוח האחיד).
@@ -40,9 +40,9 @@ FLUX_IMAGE_SIZE = os.environ.get("FLUX_IMAGE_SIZE", "portrait_16_9")  # 9:16 nat
 FLUX_INFERENCE_STEPS = int(os.environ.get("FLUX_INFERENCE_STEPS", "28"))
 FLUX_PARALLEL = int(os.environ.get("FLUX_PARALLEL", "5"))
 
-# Shalhevet's LoRA (לפאנלים אישיים)
-SHALHEVET_LORA_URL = os.environ.get("SHALHEVET_LORA_URL", "")
-SHALHEVET_LORA_TRIGGER = os.environ.get("SHALHEVET_LORA_TRIGGER", "shalhevet")
+# LoRA אישי של המגיש/ה (לפאנלים אישיים) - מודל שאימנת ב-fal על תמונות שלך
+PERSONAL_LORA_URL = os.environ.get("PERSONAL_LORA_URL", "")
+PERSONAL_LORA_TRIGGER = os.environ.get("PERSONAL_LORA_TRIGGER", "")
 
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 SKILL_PATH = PROJECT_ROOT / "b-roll-prompter" / "b-roll-prompter.md"
@@ -81,7 +81,7 @@ def load_skill_content() -> str:
 # ============================================================
 
 def is_personal_panel(panel_text: str) -> bool:
-    """מזהה פאנל אישי (שלהבת בקאדר) לפי הסימון 🪞 PERSONAL PANEL."""
+    """מזהה פאנל אישי (המגיש/ה בקאדר) לפי הסימון 🪞 PERSONAL PANEL."""
     return bool(re.search(r'🪞\s*PERSONAL\s*PANEL', panel_text, re.IGNORECASE))
 
 
@@ -253,11 +253,11 @@ Return ONLY valid JSON:
 
 def _build_flux_arguments(prompt: str, is_personal: bool, seed: Optional[int] = None) -> tuple:
     """בונה ארגומנטים לקריאה ל-Flux. מחזיר (endpoint, arguments)."""
-    use_lora = is_personal and SHALHEVET_LORA_URL
+    use_lora = is_personal and PERSONAL_LORA_URL
 
     # אם פאנל אישי + יש לורה — לוודא ש-trigger word בתחילת הפרומפט
-    if use_lora and SHALHEVET_LORA_TRIGGER not in prompt[:60].lower():
-        prompt = f"{SHALHEVET_LORA_TRIGGER}, {prompt}"
+    if use_lora and PERSONAL_LORA_TRIGGER and PERSONAL_LORA_TRIGGER.lower() not in prompt[:60].lower():
+        prompt = f"{PERSONAL_LORA_TRIGGER}, {prompt}"
 
     base_args = {
         "prompt": prompt,
@@ -270,7 +270,7 @@ def _build_flux_arguments(prompt: str, is_personal: bool, seed: Optional[int] = 
 
     if use_lora:
         endpoint = FLUX_LORA_ENDPOINT
-        base_args["loras"] = [{"path": SHALHEVET_LORA_URL, "scale": 1.0}]
+        base_args["loras"] = [{"path": PERSONAL_LORA_URL, "scale": 1.0}]
     else:
         endpoint = FLUX_ENDPOINT
 
@@ -549,9 +549,9 @@ def generate_all_images(storyboard: str, output_dir: Path) -> List[Path]:
 
     print(f"\n   📋 זוהו {len(panels)} פאנלים, {len(relevant)} מתאימים לתמונות")
     if personal_count:
-        print(f"   🪞 {personal_count} פאנלים אישיים (ישתמשו ב-LoRA: {SHALHEVET_LORA_TRIGGER})")
-        if not SHALHEVET_LORA_URL:
-            print(f"   ⚠️  אין SHALHEVET_LORA_URL ב-.env — פאנלים אישיים יוצרו ללא LoRA")
+        print(f"   🪞 {personal_count} פאנלים אישיים (ישתמשו ב-LoRA: {PERSONAL_LORA_TRIGGER})")
+        if not PERSONAL_LORA_URL:
+            print(f"   ⚠️  אין PERSONAL_LORA_URL ב-.env — פאנלים אישיים יוצרו ללא LoRA")
 
     print(f"\n   🎨 Flux endpoint: {FLUX_ENDPOINT}")
     print(f"   📐 Image size: {FLUX_IMAGE_SIZE}")
