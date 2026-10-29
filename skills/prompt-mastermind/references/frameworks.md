@@ -180,7 +180,7 @@ Expectation: תגובה של 3-4 משפטים, מתחילה בהכרה בבעי�
 
 **Before / After:**
 - Before: *"לקוח התלונן על חיוב כפול, תכתוב לו תגובה יפה"* - 4 רכיבים חסרים.
-- After: *"Role: CS בחברה קטנה, גישה אמפתית-פתרונית. Action: תגובה פומבית ל-Trustpilot review. Context: חיוב כפול, כבר הוחזר, הבעיה נפתרה. Expectation: 3-4 משפטים, הכרה←תיקון←הזמנה ישירה; בלי הבטחות עתידיות."* - כל רכיב מגובה ב-specifics שמשנים את התוצאה.
+- After: *"Role: CS בחברה קטנה, גישה אמפתית-פתרונית. Action: תגובה פומבית ל-Trustpilot review. Context: חיוב כפול, כבר הוחזר, הבעיה נפתרה. Expectation: 3-4 משפטים, הכרה ← תיקון ← הזמנה ישירה; בלי הבטחות עתידיות."* - כל רכיב מגובה ב-specifics שמשנים את התוצאה.
 
 ---
 
@@ -675,7 +675,7 @@ ___
 - **Role** - מי אתה.
 - **Instructions** - הוראות כלליות.
 - **Steps** - תהליך לביצוע.
-- **Examples** - 2-5 דוגמאות של input>output.
+- **Examples** - 2-5 דוגמאות של input ← output.
 
 **Template (עברית):**
 ```
@@ -737,7 +737,7 @@ Output: "השיעור הבא שלך - מוכן עד ההפסקה."
 
 **Before / After:**
 - Before: *"תכתוב tagline למוצר: [תיאור]. תסתכל על דוגמאות של taglines טובים באינטרנט"* - Claude לא יודע *איזה* סגנון אתה רוצה.
-- After: *"Role: copywriter B2B SaaS. Instructions: tagline 4-7 מילים עברית, אישיות + ערך ראשי. Examples: [3 דוגמאות input>output]"* - Claude מסיק את הדפוס מהדוגמאות, מדויק יותר.
+- After: *"Role: copywriter B2B SaaS. Instructions: tagline 4-7 מילים עברית, אישיות + ערך ראשי. Examples: [3 דוגמאות input ← output]"* - Claude מסיק את הדפוס מהדוגמאות, מדויק יותר.
 
 **Research basis:** Few-shot prompting - **Brown et al., *Language Models are Few-Shot Learners*, NeurIPS 2020** (הידוע כ-GPT-3 paper). הוכח שהוספת 2-5 דוגמאות טובות משפרת ביצועים מעל הוראות מילוליות ארוכות.
 
@@ -810,7 +810,7 @@ Output: "השיעור הבא שלך - מוכן עד ההפסקה."
 
 **ראשי תיבות:** (אין ראשי תיבות - שם שלם)
 
-**שורה אחת:** לולאת שיפור איטרטיבית - Generate > Feedback > Refine, חוזר עד עמידה בקריטריון.
+**שורה אחת:** לולאת שיפור איטרטיבית - Generate ← Feedback ← Refine, חוזר עד עמידה בקריטריון.
 
 **מתי להשתמש:** האיכות חשובה, אין דחיפות, וערך גבוה של שיפור הדרגתי.
 
@@ -1010,7 +1010,7 @@ N מילים בדיוק (אורך קבוע לכל איטרציה).
 - Before: *"תכתוב מדריך מפורט על בניית skills"* - אין מבנה, אין אורך, אין נק' מוגדרות.
 - After: *"Phase 1: שלד של 7 נקודות, כותרת+משפט. Phase 2: הרחב כל אחת ל-80-120 מילים עם נקודה+דוגמה+tip. Phase 3: חיבור עם headers."* - outline-first, כל חלק דטרמיניסטי.
 
-**Research basis:** **Ning et al., *Skeleton-of-Thought: Large Language Models Can Do Parallel Decoding*, ICLR 2024** (arXiv 2307.15337). הטכניקה הותאמה לתהליך סדרתי (outline>expand) והוכחה כמקצרת latency וגם משפרת coherence ב-long-form generation.
+**Research basis:** **Ning et al., *Skeleton-of-Thought: Large Language Models Can Do Parallel Decoding*, ICLR 2024** (arXiv 2307.15337). הטכניקה הותאמה לתהליך סדרתי (outline ← expand) והוכחה כמקצרת latency וגם משפרת coherence ב-long-form generation.
 
 ---
 
@@ -1065,7 +1065,7 @@ ___
 **Components Filling Guide:**
 - **Problem** - טוב: תיאור מלא + כל הנתונים המספריים + תלויות ידועות ("80 הודעות/יום, 4,000 input tokens, 1,200 output, 35 לקוחות, $3 input, $15 output"). גרוע: "כמה זה יעלה לי?".
 - **Trigger phrase** - השתמש בניסוח מדויק: "בוא נתכנן את הפתרון ונפתור שלב-שלב. שים לב לשמות משתנים ולערכים המספריים." זה הטריגר שמעלה דיוק ב-zero-shot.
-- **Instructions** - טוב: 4 שלבים: identify variables > plan sequence > solve each > state final answer. גרוע: "תחשב".
+- **Instructions** - טוב: 4 שלבים: identify variables ← plan sequence ← solve each ← state final answer. גרוע: "תחשב".
 
 **Before / After:**
 - Before: *"כמה יעלה לי להריץ סוכן ללקוחות אם יש לי 35 לקוחות?"* - חסר מידע, אין הוראת planning.
@@ -1789,7 +1789,7 @@ conversational - שאלה-שאלה, עם follow-up.
 
 **ראשי תיבות:** Reasoning + Acting
 
-**שורה אחת:** לולאת Thought > Action > Observation - חשיבה ופעולה עם כלים איטרטיבית.
+**שורה אחת:** לולאת Thought ← Action ← Observation - חשיבה ופעולה עם כלים איטרטיבית.
 
 **מתי להשתמש:** סוכן שמשתמש בכלים (search, execute code, API calls), ובו כל תוצאה משפיעה על הצעד הבא.
 
@@ -1855,13 +1855,13 @@ ___
 **Components Filling Guide:**
 - **Goal** - טוב: מטרה קונקרטית + deliverable ("דוח competitive analysis של 500-800 מילים"). גרוע: "תחקור את המתחרים".
 - **Available Tools** - טוב: רשימה מפורשת + תיאור קצר לכל כלי - הסוכן צריך לדעת *מה* יש ו-*איך* להשתמש. גרוע: "תשתמש בכלים המתאימים".
-- **Workflow** - טוב: לולאת Thought>Action>Observation מפורשת + הוראה מתי לחזור ומתי לסיים. גרוע: "תחזור בלולאה".
+- **Workflow** - טוב: לולאת Thought ← Action ← Observation מפורשת + הוראה מתי לחזור ומתי לסיים. גרוע: "תחזור בלולאה".
 - **Stop Condition** - טוב: תנאי הצלחה + upper bound ("נתונים על 3 מתחרים, או אחרי 12 turns"). גרוע: "כשתסיים".
 - **Final Output** - טוב: פורמט מפורש + אורך + structure ("דוח 500-800 מילים: טבלה + תובנות + המלצות"). גרוע: "תן לי סיכום".
 
 **Before / After:**
 - Before: *"תהיה סוכן שיעזור לי לחקור מתחרים. השתמש ב-web search כמה שצריך"* - אין stop condition, אין deliverable ברור.
-- After: *"Goal: דוח competitive analysis. Tools: web_search, web_fetch, calculator. Workflow: Thought>Action>Observation loop. Stop: 3 מתחרים + ICP/pricing/positioning, או 12 turns. Output: 500-800 מילים, טבלה + תובנות + המלצות."* - לולאה סופית עם output דטרמיניסטי.
+- After: *"Goal: דוח competitive analysis. Tools: web_search, web_fetch, calculator. Workflow: Thought ← Action ← Observation loop. Stop: 3 מתחרים + ICP/pricing/positioning, או 12 turns. Output: 500-800 מילים, טבלה + תובנות + המלצות."* - לולאה סופית עם output דטרמיניסטי.
 
 **Research basis:** **Yao et al., *ReAct: Synergizing Reasoning and Acting in Language Models*, ICLR 2023** (arXiv 2210.03629). הפריימוורק המקורי של Princeton + Google Brain ל-tool-augmented reasoning. הוכח שיפור ב-HotpotQA ו-ALFWorld על ידי שילוב reasoning traces עם action steps.
 

@@ -131,7 +131,7 @@ description: הסקיל הזה הופך כוונה גולמית לפרומפט �
 | כללים + דוגמאות (מאוחדים) | **CARE** |
 | קהל, טון, סגנון - קריטיים | **CO-STAR** |
 | פרוצדורה רב-שלבית או מתודולוגיה | **RISEN** |
-| טרנספורמציית נתונים (input > output) | **RISE-IE** |
+| טרנספורמציית נתונים (input ← output) | **RISE-IE** |
 | יצירת תוכן עם דוגמאות רפרנס | **RISE-IX** |
 
 #### D. TRANSFORM - שיפור או המרה
@@ -165,13 +165,13 @@ description: הסקיל הזה הופך כוונה גולמית לפרומפט �
 | ודא שההסקה לא פספסה תנאים | **RCoT** |
 
 #### A. RECOVER
-← **RPEF** (Reverse Prompt Engineering)
+ ← **RPEF** (Reverse Prompt Engineering)
 
 #### B. CLARIFY
-← **Reverse Role Prompting** (AI-Led Interview)
+ ← **Reverse Role Prompting** (AI-Led Interview)
 
 #### G. AGENTIC
-← **ReAct**
+ ← **ReAct**
 
 ---
 
