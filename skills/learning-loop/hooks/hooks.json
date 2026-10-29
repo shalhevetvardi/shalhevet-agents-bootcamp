@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f ./LEARNINGS.md ]; then echo '📘 ספר המשחקים של הסוכן (LEARNINGS.md) - אמץ את הלקחים הבאים כהנחיות פעילות לשיחה הזו:'; echo '---'; cat ./LEARNINGS.md; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
