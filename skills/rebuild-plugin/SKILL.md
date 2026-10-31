@@ -77,7 +77,7 @@ description: >-
    `~/.claude/plugins/marketplaces/local-desktop-app-uploads/<שם-הסוכן>`
    - אם התיקייה `~/.claude/plugins/marketplaces/local-desktop-app-uploads` **לא קיימת** (סביבה שאינה Claude Desktop מקומי) - **מדלג על ההתקנה האוטומטית**, ומנחה התקנה ידנית (ראה למטה). לא מנחש נתיבים.
    - אם היא קיימת:
-     - **א. מחלץ ומעתיק את הקבצים.** מחלץ את ה-`.plugin` לתיקייה זמנית. פקודת החילוץ לפי מערכת ההפעלה: Mac - `ditto -xk` או `unzip`; Linux - `unzip`; Windows - **לא `Expand-Archive`:** הוא מסרב לכל קובץ שהסיומת שלו אינה `.zip` ונכשל על `.plugin` ("is not a supported archive file format"). מחלצים דרך .NET, שלא בודק סיומת ולא דורש לשנות או להעתיק את קובץ ה-`.plugin`:
+     - **א. מחלץ ומעתיק את הקבצים.** מחלץ את ה-`.plugin` לתיקייה זמנית. פקודת החילוץ לפי מערכת ההפעלה: Mac - `ditto -xk` או `unzip`; Linux - `unzip`; Windows - **לא `Expand-Archive`:** בגרסאות מסוימות, כולל PowerShell 5.1 שמגיע עם Windows, הוא מסרב לקובץ שהסיומת שלו אינה `.zip` ונכשל על `.plugin` ("is not a supported archive file format"). מחלצים דרך .NET, שלא בודק סיומת ולא דורש לשנות או להעתיק את קובץ ה-`.plugin`:
        ```powershell
        Add-Type -AssemblyName System.IO.Compression.FileSystem
        $tmp = "C:\Temp\<שם-הסוכן>"
