@@ -77,7 +77,15 @@ description: >-
    `~/.claude/plugins/marketplaces/local-desktop-app-uploads/<שם-הסוכן>`
    - אם התיקייה `~/.claude/plugins/marketplaces/local-desktop-app-uploads` **לא קיימת** (סביבה שאינה Claude Desktop מקומי) - **מדלג על ההתקנה האוטומטית**, ומנחה התקנה ידנית (ראה למטה). לא מנחש נתיבים.
    - אם היא קיימת:
-     - **א. מחלץ ומעתיק את הקבצים.** מחלץ את ה-`.plugin` לתיקייה זמנית. פקודת החילוץ לפי מערכת ההפעלה: Mac - `ditto -xk` או `unzip`; Windows - `Expand-Archive`; Linux - `unzip`. מוודא שבתיקייה שחולצה יש `.claude-plugin/plugin.json`. **ב-Windows: לחלץ לנתיב זמני קצר (למשל `C:\Temp\<שם-הסוכן>`), לא לתת-תיקייה עמוקה - MAX_PATH הוא 260 תווים, ומשתמש עם OneDrive + תיקיות בעברית חוצה אותו ו-`ExtractToDirectory` נכשל בשקט.** **פלאגין כבד (למשל עם `node_modules`, אלפי קבצים): `Expand-Archive` ב-Windows איטי מאוד ועלול להיתקע - במקרה כזה מדלגים על החילוץ ומעתיקים ישירות משורש הפלאגין במקור עם `robocopy <מקור> <יעד> /E` (exit code 0 או 1 = הצלחה).**
+     - **א. מחלץ ומעתיק את הקבצים.** מחלץ את ה-`.plugin` לתיקייה זמנית. פקודת החילוץ לפי מערכת ההפעלה: Mac - `ditto -xk` או `unzip`; Linux - `unzip`; Windows - **לא `Expand-Archive`:** הוא מסרב לכל קובץ שהסיומת שלו אינה `.zip` ונכשל על `.plugin` ("is not a supported archive file format"). מחלצים דרך .NET, שלא בודק סיומת ולא דורש לשנות או להעתיק את קובץ ה-`.plugin`:
+       ```powershell
+       Add-Type -AssemblyName System.IO.Compression.FileSystem
+       $tmp = "C:\Temp\<שם-הסוכן>"
+       if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+       [System.IO.Compression.ZipFile]::ExtractToDirectory("<נתיב-מלא-ל-.plugin>", $tmp)
+       ```
+       (חלופה אם המחלץ הזה לא עובד אצלך: להעתיק את ה-`.plugin` לקובץ זמני עם סיומת `.zip` ב-`$env:TEMP`, להריץ עליו `Expand-Archive`, ולמחוק את הזמני. קובץ ה-`.plugin` עצמו נשאר כמו שהוא.)
+       אחרי החילוץ מוודא שבתיקייה שחולצה יש `.claude-plugin/plugin.json`. **ב-Windows: לחלץ לנתיב זמני קצר (למשל `C:\Temp\<שם-הסוכן>`), לא לתת-תיקייה עמוקה - MAX_PATH הוא 260 תווים, ומשתמש עם OneDrive + תיקיות בעברית חוצה אותו ו-`ExtractToDirectory` נכשל בשקט.** **פלאגין כבד (למשל עם `node_modules`, אלפי קבצים): החילוץ ב-Windows עלול להיות איטי מאוד או להיתקע - במקרה כזה מדלגים על החילוץ ומעתיקים ישירות משורש הפלאגין במקור עם `robocopy <מקור> <יעד> /E` (exit code 0 או 1 = הצלחה).**
      - **ב.** אם כבר קיימת תיקייה מותקנת בשם הזה - **מגבה אותה קודם** (שינוי שם ל-`<שם-הסוכן>.bak`), ורק אז מעתיק את החדשה למקומה. כך הישן מוחלף בצורה בטוחה.
      - **ג. רושם את הפלאגין - שלושה קבצי רישום.** זה מה שגורם לפלאגין להיטען. קבצים על הדיסק לבד לא מספיקים - בלי שלושת הקבצים האלה הפלאגין ייראה מותקן לחלוטין ופשוט לא יעלה, בלי שום שגיאה. בכל קובץ: **קורא קודם, שומר על כל שאר הרשומות, כותב מחדש UTF-8 בלי BOM** (ב-Windows: `[System.IO.File]::WriteAllText`).
        1. **`~/.claude/plugins/installed_plugins.json`** (סכמה `"version": 2`): הרשומות יושבות **בתוך** המפתח `plugins` (לא ברמה העליונה של הקובץ!), כל אחת כמפה `"<שם-הסוכן>@local-desktop-app-uploads"` ← **מערך בן איבר אחד**: `{"scope": "user", "installPath": "<נתיב מלא לתיקייה המותקנת>", "version": "<גרסה>", "installedAt": "<ISO>", "lastUpdated": "<ISO>"}`. קיים - עדכן `version` ו-`lastUpdated`; לא קיים - הוסף רשומה מלאה.
