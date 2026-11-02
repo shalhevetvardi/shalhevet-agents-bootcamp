@@ -20,3 +20,6 @@ httpcore2>=2.10.0
 # google-* packages above, so it stays on the 5.x line (the oldest line with the fix).
 aiohttp>=3.14.3
 protobuf==5.29.6
+# certifi (arrives through requests): the version picked when nothing sets a floor carries
+# HIGH advisories fixed in 2026.10.18 (osv-scanner, 2026-11-02).
+certifi>=2026.10.18
