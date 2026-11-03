@@ -104,8 +104,18 @@ def cmd_where(a):
             file=sys.stderr,
         )
         return EXIT_MISSING_FOLDER
-    print(folder)
+    print(for_shell(folder))
     return 0
+
+
+def for_shell(path, sep=os.sep):
+    """The path as the shell commands use it: forward slashes on Windows.
+
+    DATA=$(... where) is joined with "/" in every command ("$DATA"/יומנים/...), and Git Bash and
+    Python both accept a drive path with forward slashes (C:/...). A path with backslashes would
+    end up half and half.
+    """
+    return path.replace("\\", "/") if sep == "\\" else path
 
 
 def cmd_init(a):
