@@ -32,7 +32,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import HebrewParser  # noqa: E402
+from common import HebrewParser, setup_io  # noqa: E402
 
 WORD = re.compile(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>')
 HEB = re.compile(r"[֐-׿]")
@@ -48,8 +48,10 @@ FIELDS = ["card", "billing_date", "purchase_date", "merchant", "branch", "detail
 
 
 def words_by_page(pdf):
-    out = subprocess.run(["pdftotext", "-bbox", str(pdf), "/dev/stdout"],
-                         capture_output=True, text=True, check=True).stdout
+    # "-" and not /dev/stdout, which does not exist on Windows; pdftotext writes UTF-8 by default,
+    # so it is decoded as UTF-8 and not with the locale code page.
+    out = subprocess.run(["pdftotext", "-bbox", str(pdf), "-"],
+                         capture_output=True, text=True, encoding="utf-8", check=True).stdout
     for page in out.split("<page ")[1:]:
         yield [(float(a), float(b), float(c), float(d), html.unescape(w))
                for a, b, c, d, w in WORD.findall(page)]
@@ -120,7 +122,8 @@ def money(text):
 
 
 def parse_statement(pdf):
-    raw = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True, text=True).stdout
+    raw = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True, text=True,
+                         encoding="utf-8").stdout
     flat = BIDI.sub("", raw)
     card = re.search(r"המסתיים ב\s*-?\s*(\d{4})", flat)
     bill = re.search(r"דף חיוב חודשי ל\s*-?\s*(\d\d)/(\d\d)/(\d\d)", flat)
@@ -292,6 +295,8 @@ def write_work_file(folder, meta, rows, world, period=None):
 
 
 def main():
+    # Windows: without this, stdout to a pipe uses the locale code page and Hebrew output crashes.
+    setup_io()
     ap = HebrewParser(description="קורא דפי פירוט של כאל (PDF) ובודק כל דף מול סכום החיוב שכתוב בו. "
                       "--out: קובץ אחד עם כל העסקאות (להשוואה מול התזרים). --work-dir: קובץ עבודה לכל דף, "
                       "למיון. עסקה בתשלומים נרשמת בתאריך החיוב של התשלום. דורש pdftotext.")
