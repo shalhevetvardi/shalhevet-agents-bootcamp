@@ -50,11 +50,14 @@ description: >-
 4. **מוודא שקיימת `plugins-to-install/`** בשורש ריפו הקורס - התיקייה שמכילה את `agents/` (אותה תיקייה שהשיחה מחוברת אליה). אם לא קיימת - **יוצר אותה שם בעצמו** (זה צפוי אצל מי שסיים את ההכנה לפני שהתיקייה נכנסה למבנה - יוצרים וממשיכים). לא שם אותה מחוץ לריפו.
 
 5. **אורז** את **שורש הפלאגין** (כפי שזוהה בשלב 2א - לא בהכרח תיקיית הסוכן עצמה) לקובץ `.plugin` בתוך `plugins-to-install/`. פקודת האריזה לפי מערכת ההפעלה:
-   - **Mac / Linux:**
+   - **Mac / Linux - אורזים קודם לתיקייה זמנית, ורק אחר כך מעתיקים ליעד הסופי.** לא כותבים `zip` ישירות לתוך `plugins-to-install/`: כשקובץ `.plugin` בשם הזה כבר קיים שם, `zip` יוצר קובץ זמני ליד היעד ומחליף איתו את הקיים. בסביבה שבה התיקייה מחוברת מבחוץ (למשל Cowork) ההחלפה הזו נחסמת ב-"Operation not permitted". `cp` כותב לתוך הקובץ הקיים במקומו, ולכן עובר. מריצים את הבלוק כולו בקריאה אחת (המשתנה `TMP_DIR` לא שורד בין קריאות נפרדות):
      ```bash
-     cd <שורש-הפלאגין>
-     zip -r <שורש-הריפו>/plugins-to-install/<שם-הסוכן>.plugin . -x "*.DS_Store" -x "*/.git/*" -x "*.plugin" -x "*.zip"
+     TMP_DIR="$(mktemp -d)"
+     (cd "<שורש-הפלאגין>" && zip -r "$TMP_DIR/<שם-הסוכן>.plugin" . -x "*.DS_Store" -x "*/.git/*" -x "*.plugin" -x "*.zip")
+     cp "$TMP_DIR/<שם-הסוכן>.plugin" "<שורש-הריפו>/plugins-to-install/<שם-הסוכן>.plugin"
+     cmp "$TMP_DIR/<שם-הסוכן>.plugin" "<שורש-הריפו>/plugins-to-install/<שם-הסוכן>.plugin" && rm -rf "$TMP_DIR"
      ```
+     אם `cp` או `cmp` נכשלים - **עוצרים ולא ממשיכים לשלב 6**: מדווחים למשתמש את השגיאה ואת נתיב הקובץ הזמני, ולא מוחקים אותו. לא מנסים לעקוף עם `mv` או עם מחיקת הקובץ הקיים - אלה נחסמים באותה צורה.
    - **Windows (PowerShell) - אסור `Compress-Archive`:** ב-Windows PowerShell 5.1, `Compress-Archive` כותב path separators עם backslash בתוך ה-zip (לא forward slash) - זה שובר קוראי zip חוצי-פלטפורמה (כולל מתקין הפלאגינים), וגורם ל-"plugin.json is not valid JSON" גם כשה-JSON תקין, כי הוא לא נמצא בנתיב הצפוי. חובה לבנות את ה-zip ישירות דרך `System.IO.Compression.ZipArchive` עם שמות entry בעלי forward slash:
      ```powershell
      Add-Type -AssemblyName System.IO.Compression
