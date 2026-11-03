@@ -19,9 +19,12 @@ class ScriptError(Exception):
 # ---------------------------------------------------------------- קלט/פלט
 
 def setup_io():
+    # UTF-8 so Hebrew prints on Windows too, where a pipe gets the locale code page.
+    # newline="\n": on Windows print() ends lines with \r\n, and DATA=$(... where) in Git Bash
+    # would keep the \r at the end of the path.
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8")
+            stream.reconfigure(encoding="utf-8", newline="\n")
         except Exception:
             pass
 
